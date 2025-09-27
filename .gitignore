@@ -1,0 +1,54 @@
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+
+# Ignore IDE/LSP configuration files
+.project
+.settings/
+.classpath
+.factorypath
+bin/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.iml
+
+# Debug log files
+*.log
+android-tools-debug.log
+debug-android.log
+detailed-module-detection.log
+final-test.log
+graphitem-debug.log
+self-dep-debug.log
+test-logging.log
+test-modelbuilder-fix.log
+variants-debug.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Agents
+
+.gemini/
+.claude/
+.mcp.json
+
+#Neovim Socket
+nvim.socket
