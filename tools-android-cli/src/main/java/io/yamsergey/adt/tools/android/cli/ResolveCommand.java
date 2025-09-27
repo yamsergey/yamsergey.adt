@@ -7,6 +7,7 @@ import java.util.concurrent.Callable;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
+import io.yamsergey.adt.tools.android.cli.serialization.jackson.ParentIgnoreMixIn;
 import io.yamsergey.adt.tools.android.cli.serialization.jackson.ProjectMixIn;
 import io.yamsergey.adt.tools.android.cli.serialization.jackson.TaskMixIn;
 import io.yamsergey.adt.tools.android.model.project.Project;
@@ -105,6 +106,11 @@ public class ResolveCommand implements Callable<Integer> {
       ObjectMapper mapper = new ObjectMapper();
       mapper.enable(SerializationFeature.INDENT_OUTPUT);
       mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+
+      // Globally ignore 'parent' properties to break circular references
+      mapper.addMixIn(Object.class, ParentIgnoreMixIn.class);
+
+      // Add mixins to handle circular references in Gradle objects
       mapper.addMixIn(org.gradle.tooling.model.Task.class, TaskMixIn.class);
       mapper.addMixIn(org.gradle.tooling.model.GradleProject.class, ProjectMixIn.class);
 
