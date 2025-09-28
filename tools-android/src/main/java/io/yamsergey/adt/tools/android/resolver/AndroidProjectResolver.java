@@ -87,65 +87,8 @@ public class AndroidProjectResolver implements Resolver<Project> {
       }
     }
 
-    // TODO: Gradle has tree structure for their projects, which is not needed for
-    // our case, we should flatten the structure to easisly goes throug all
-    // subprojects.
-    var modules = gradleProject.getChildren().stream().<ResolvedModule>map(subProject -> {
-      if (isAndroidProject(subProject)) {
-        var androidProject = connection.action(FetchAndroidProject.builder().gradleProject(subProject).build()).run();
-
-        return switch (androidProject) {
-          case Success<AndroidProject> success -> {
-            var moduleBuildVariants = new BuildVariantsResolver(success.value()).resolve();
-
-            yield switch (moduleBuildVariants) {
-              case Success<Collection<BuildVariant>> variants -> {
-                var resolvedModuleSources = new AndroidModuleSourcesResolver(subProject, connection, gradleProject)
-                    .resolve();
-                var moduleBuildVariant = VariantUtils.chooseBuildVariant(selectedBuildVariant, variants.value());
-                var resolvedVariantResult = new AndroidModuleDependencyResolver(
-                    moduleBuildVariant,
-                    subProject,
-                    connection,
-                    success.value())
-                    .resolve();
-
-                yield switch (resolvedModuleSources) {
-                  case Success<Collection<SourceRoot>> sources -> switch (resolvedVariantResult) {
-                    case Success<ResolvedVariant> resolvedVariant -> ResolvedAndroidModule.builder()
-                        .buildVariants(variants.value())
-                        .dependencies(resolvedVariant.value().dependencies())
-                        .roots(resolvedVariant.value().generatedRoots())
-                        .roots(sources.value())
-                        .build();
-                    case Failure<ResolvedVariant> failure -> FailedModule.from(failure, subProject);
-                    default -> FailedModule.builder()
-                        .details(
-                            String.format("Unknown result of module variant resolution for: %s", subProject.getPath()))
-                        .build();
-                  };
-                  case Failure<Collection<SourceRoot>> failure -> FailedModule.from(failure, subProject);
-                  default -> FailedModule.builder()
-                      .details(
-                          String.format("Unknown result for sorce set resolution for: %s", subProject.getPath()))
-                      .build();
-                };
-              }
-              case Failure<Collection<BuildVariant>> failure -> FailedModule.from(failure, subProject);
-              default ->
-                FailedModule.builder()
-                    .details("Unknown buiod variant resolution result")
-                    .build();
-            };
-          }
-          case Failure<AndroidProject> failure -> FailedModule.from(failure, subProject);
-          default ->
-            FailedModule.builder().details("Unknown android project resolution result").build();
-        };
-      } else {
-        return UnknownModule.builder().name(subProject.getName()).path(subProject.getPath()).build();
-      }
-    }).toList();
+    ModuleResolutionStrategy moduleResolutionStrategy = new DefaultModuleResolver();
+    var modules = moduleResolutionStrategy.resolveModules(connection, gradleProject, selectedBuildVariant);
 
     return Result.<Project>success()
         .value(Project.builder()

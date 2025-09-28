@@ -1,12 +1,17 @@
 package io.yamsergey.adt.tools.android.resolver;
 
 import java.util.Collection;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javax.annotation.Nonnull;
 
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.GradleProject;
 
+import com.android.builder.model.v2.ide.GraphItem;
+import com.android.builder.model.v2.ide.Library;
 import com.android.builder.model.v2.models.AndroidProject;
 import com.android.builder.model.v2.models.VariantDependencies;
 
@@ -83,20 +88,49 @@ public class AndroidModuleDependencyResolver implements Resolver<ResolvedVariant
   /**
    * Extract project dependencies. {@link VariantDependencies} contains list of
    * all libraries for the project
-   * and dependencies graph for the variant. This functiin will parse
-   * {@link GraphItem} from compile Dependencies
-   * and try to find path to resolved jars in provided libraries list. There are
-   * two types of dependencies in the result: {@link JarDependency} ,
+   * and dependencies graph for the variant. This function will parse
+   * {@link GraphItem} from compile Dependencies recursively to flatten the entire
+   * dependency tree and try to find path to resolved jars in provided libraries list.
+   * There are two types of dependencies in the result: {@link JarDependency} ,
    * {@link AarDependency}.
    *
    * @param dependencies dependencies for resolving.
-   * @return collection of resolved dependencies for provided variant.
+   * @return collection of resolved dependencies for provided variant with all transitive dependencies flattened.
    **/
   private Collection<Dependency> extractDependencies(VariantDependencies dependencies) {
-    var librarires = dependencies.getLibraries();
-    return dependencies.getMainArtifact().getCompileDependencies().stream()
-        .map(item -> GraphItemUtils.resolveDependency(item, Dependency.Scope.COMPILE, librarires))
-        .filter(optional -> optional.isPresent()).map(optional -> optional.get()).toList();
+    var libraries = dependencies.getLibraries();
+
+    return dependencies.getMainArtifact().getCompileDependencies()
+        .parallelStream()
+        .flatMap(rootItem -> flattenGraphItemRecursively(rootItem, libraries))
+        .collect(Collectors.toSet());
+  }
+
+  /**
+   * Recursively flatten GraphItem dependency tree to extract all transitive dependencies.
+   * Returns a stream of dependencies that can be processed in parallel.
+   *
+   * @param graphItem the current GraphItem to process
+   * @param libraries map of library definitions for resolving dependencies
+   * @return stream of dependencies from this GraphItem and all its children
+   */
+  private Stream<Dependency> flattenGraphItemRecursively(
+      GraphItem graphItem,
+      Map<String, Library> libraries) {
+
+    // Create stream for current item
+    Stream<Dependency> currentStream = GraphItemUtils
+        .resolveDependency(graphItem, Dependency.Scope.COMPILE, libraries)
+        .map(Stream::of)
+        .orElse(Stream.empty());
+
+    // Create stream for all children
+    Stream<Dependency> childrenStream = graphItem.getDependencies()
+        .parallelStream()
+        .flatMap(child -> flattenGraphItemRecursively(child, libraries));
+
+    // Combine current item and children streams
+    return Stream.concat(currentStream, childrenStream);
   }
 
   /**
