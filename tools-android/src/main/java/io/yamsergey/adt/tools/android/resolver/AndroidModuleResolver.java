@@ -7,9 +7,12 @@ import javax.annotation.Nonnull;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.GradleProject;
 
+import com.android.builder.model.v2.ide.ProjectType;
 import com.android.builder.model.v2.models.AndroidProject;
+import com.android.builder.model.v2.models.BasicAndroidProject;
 
 import io.yamsergey.adt.tools.android.gradle.FetchAndroidProject;
+import io.yamsergey.adt.tools.android.gradle.FetchBasicAndroidProject;
 import io.yamsergey.adt.tools.android.gradle.utils.VariantUtils;
 import io.yamsergey.adt.tools.android.model.SourceRoot;
 import io.yamsergey.adt.tools.android.model.module.FailedModule;
@@ -63,6 +66,8 @@ public class AndroidModuleResolver {
 
         var androidProjectResult = connection.action(
                 FetchAndroidProject.builder().gradleProject(subProject).build()).run();
+        var basicProjectResult = connection.action(
+                FetchBasicAndroidProject.builder().gradleProject(subProject).build()).run();
 
         return switch (androidProjectResult) {
             case Success<AndroidProject> success -> {
@@ -82,14 +87,28 @@ public class AndroidModuleResolver {
 
                         yield switch (resolvedModuleSources) {
                             case Success<Collection<SourceRoot>> sources -> switch (resolvedVariantResult) {
-                                case Success<ResolvedVariant> resolvedVariant -> ResolvedAndroidModule.builder()
-                                        .name(subProject.getName())
-                                        .path(subProject.getPath())
-                                        .buildVariants(variants.value())
-                                        .dependencies(resolvedVariant.value().dependencies())
-                                        .roots(resolvedVariant.value().generatedRoots())
-                                        .roots(sources.value())
-                                        .build();
+                                case Success<ResolvedVariant> resolvedVariant -> {
+                                    // Determine module type from BasicAndroidProject
+                                    ResolvedAndroidModule.Type moduleType = switch (basicProjectResult) {
+                                        case Success<BasicAndroidProject> basicProject ->
+                                            basicProject.value().getProjectType() == ProjectType.APPLICATION
+                                                ? ResolvedAndroidModule.Type.APPLICATION
+                                                : ResolvedAndroidModule.Type.LIBRARY;
+                                        case Failure<BasicAndroidProject> failure -> ResolvedAndroidModule.Type.LIBRARY; // Default fallback
+                                        default -> ResolvedAndroidModule.Type.LIBRARY; // Default fallback
+                                    };
+
+                                    yield ResolvedAndroidModule.builder()
+                                            .name(subProject.getName())
+                                            .path(subProject.getPath())
+                                            .type(moduleType)
+                                            .selectedVariant(moduleBuildVariant)
+                                            .buildVariants(variants.value())
+                                            .dependencies(resolvedVariant.value().dependencies())
+                                            .roots(resolvedVariant.value().generatedRoots())
+                                            .roots(sources.value())
+                                            .build();
+                                }
                                 case Failure<ResolvedVariant> failure -> FailedModule.from(failure, subProject);
                                 default -> FailedModule.builder()
                                         .name(subProject.getName())

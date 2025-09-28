@@ -92,6 +92,8 @@ public class AndroidProjectResolver implements Resolver<Project> {
 
     return Result.<Project>success()
         .value(Project.builder()
+            .name(gradleProject.getName())
+            .path(gradleProject.getPath())
             .modules(modules)
             .build())
         .build().asResult();
