@@ -1,5 +1,6 @@
 package io.yamsergey.adt.tools.android.resolver;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -20,6 +21,7 @@ import io.yamsergey.adt.tools.android.gradle.utils.GraphItemUtils;
 import io.yamsergey.adt.tools.android.model.SourceRoot;
 import io.yamsergey.adt.tools.android.model.SourceRoot.Language;
 import io.yamsergey.adt.tools.android.model.dependency.AarDependency;
+import io.yamsergey.adt.tools.android.model.dependency.ClassFolderDependency;
 import io.yamsergey.adt.tools.android.model.dependency.Dependency;
 import io.yamsergey.adt.tools.android.model.dependency.JarDependency;
 import io.yamsergey.adt.tools.android.model.variant.BuildVariant;
@@ -69,13 +71,19 @@ public class AndroidModuleDependencyResolver implements Resolver<ResolvedVariant
         .run();
 
     return switch (variantDependencies) {
-      case Success<VariantDependencies> dependencies -> Result.<ResolvedVariant>success()
-          .value(ResolvedVariant.builder()
-              .dependencies(extractDependencies(dependencies.value()))
-              .generatedRoots(extractRoots())
-              .build())
-          .build()
-          .asResult();
+      case Success<VariantDependencies> dependencies -> {
+        Collection<Dependency> allDependencies = new ArrayList<>();
+        allDependencies.addAll(extractDependencies(dependencies.value()));
+        allDependencies.addAll(extractClassesFolderDependencies());
+
+        yield Result.<ResolvedVariant>success()
+            .value(ResolvedVariant.builder()
+                .dependencies(allDependencies)
+                .generatedRoots(extractRoots())
+                .build())
+            .build()
+            .asResult();
+      }
       case Failure<VariantDependencies> failure -> failure.<ResolvedVariant>forward();
       default -> Result.<ResolvedVariant>failure()
           .description(String.format("Unknown result of variant dependencies resolution for: %s , with variant: %s",
@@ -90,12 +98,14 @@ public class AndroidModuleDependencyResolver implements Resolver<ResolvedVariant
    * all libraries for the project
    * and dependencies graph for the variant. This function will parse
    * {@link GraphItem} from compile Dependencies recursively to flatten the entire
-   * dependency tree and try to find path to resolved jars in provided libraries list.
+   * dependency tree and try to find path to resolved jars in provided libraries
+   * list.
    * There are two types of dependencies in the result: {@link JarDependency} ,
    * {@link AarDependency}.
    *
    * @param dependencies dependencies for resolving.
-   * @return collection of resolved dependencies for provided variant with all transitive dependencies flattened.
+   * @return collection of resolved dependencies for provided variant with all
+   *         transitive dependencies flattened.
    **/
   private Collection<Dependency> extractDependencies(VariantDependencies dependencies) {
     var libraries = dependencies.getLibraries();
@@ -107,7 +117,8 @@ public class AndroidModuleDependencyResolver implements Resolver<ResolvedVariant
   }
 
   /**
-   * Recursively flatten GraphItem dependency tree to extract all transitive dependencies.
+   * Recursively flatten GraphItem dependency tree to extract all transitive
+   * dependencies.
    * Returns a stream of dependencies that can be processed in parallel.
    *
    * @param graphItem the current GraphItem to process
@@ -134,9 +145,45 @@ public class AndroidModuleDependencyResolver implements Resolver<ResolvedVariant
   }
 
   /**
+   * Extract dependencies from classesFolders which include compiled output
+   * directories
+   * and R.jar files. Distinguishes between JAR files (treated as JarDependency)
+   * and
+   * class directories (treated as ClassFolderDependency).
+   *
+   * @return collection of dependencies from classesFolders
+   */
+  private Collection<Dependency> extractClassesFolderDependencies() {
+    var variant = androidProject.getVariants().stream()
+        .filter(item -> item.getName().equals(selectedVariant.name()))
+        .findFirst().get();
+    var mainArtifact = variant.getMainArtifact();
+
+    return mainArtifact.getClassesFolders().stream()
+        .<Dependency>map(file -> {
+          String path = file.getAbsolutePath();
+          if (path.endsWith(".jar")) {
+            // R.jar and other JAR files should be JarDependency
+            return JarDependency.builder()
+                .path(path)
+                .description("Android compiled artifact: " + file.getName())
+                .scope(Dependency.Scope.COMPILE)
+                .build();
+          } else {
+            // Class directories should be ClassFolderDependency
+            return ClassFolderDependency.builder()
+                .path(path)
+                .description("Compiled classes: " + file.getName())
+                .scope(Dependency.Scope.COMPILE)
+                .build();
+          }
+        })
+        .toList();
+  }
+
+  /**
    * Extract source roots pointing to generated source files.
    *
-   * @param {@link VariantDependencies}
    * @return collection of {@link SourceRoot} of the project.
    **/
   private Collection<SourceRoot> extractRoots() {
