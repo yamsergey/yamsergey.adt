@@ -50,5 +50,11 @@ Thumbs.db
 .claude/
 .mcp.json
 
-#Neovim Socket
+# Neovim Socket
 nvim.socket
+
+
+# Misc
+
+# - Unclear what is it, but pop ups time by time
+Task
