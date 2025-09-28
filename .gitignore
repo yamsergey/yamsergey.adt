@@ -58,3 +58,6 @@ nvim.socket
 
 # - Unclear what is it, but pop ups time by time
 Task
+
+# - For simplicity pattern "output-.*\.json" used for any generated json files.
+output-*\.json
