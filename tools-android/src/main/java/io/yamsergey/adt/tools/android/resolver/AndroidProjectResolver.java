@@ -5,6 +5,7 @@ import static io.yamsergey.adt.tools.android.gradle.utils.GradleProjectUtils.isA
 
 import java.io.File;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Optional;
 
@@ -160,9 +161,9 @@ public class AndroidProjectResolver implements Resolver<Project> {
             case Failure<AndroidProject> failure -> failure.<Collection<BuildVariant>>forward();
             default -> Result.<Collection<BuildVariant>>failure().build().asResult();
           };
-        }).findFirst().orElse(Result.<Collection<BuildVariant>>failure()
-            .description(
-                String.format("Couldn't find build variants for: %s", gradleProject.getChildren()))
+        }).findFirst().orElse(Result.<Collection<BuildVariant>>success()
+            .value(Collections.singletonList(BuildVariant.builder().name("debug").build()))
+            .description("No Android application project found, defaulting to 'debug' build variant.")
             .build()
             .asResult());
 
