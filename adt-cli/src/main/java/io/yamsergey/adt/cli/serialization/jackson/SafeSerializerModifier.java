@@ -46,10 +46,13 @@ public class SafeSerializerModifier extends BeanSerializerModifier {
     @Override
     public void serializeAsField(Object bean, JsonGenerator gen, SerializerProvider prov) throws Exception {
       try {
+        // First, try to get the value to see if it throws an exception
+        Object value = get(bean);
+        // If we get here without exception, proceed with normal serialization
         super.serializeAsField(bean, gen, prov);
       } catch (Exception e) {
-        // If serialization fails (e.g., UnsupportedMethodException),
-        // write null instead
+        // If getting the value fails (e.g., UnsupportedMethodException),
+        // write the field as null instead of skipping it entirely
         gen.writeFieldName(getName());
         gen.writeNull();
       }

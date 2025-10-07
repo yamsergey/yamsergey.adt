@@ -1,5 +1,6 @@
 package io.yamsergey.adt.cli;
 
+import io.yamsergey.adt.cli.explore.ExploreCommand;
 import io.yamsergey.adt.cli.resolve.ResolveCommand;
 import io.yamsergey.adt.cli.workspace.WorkspaceCommand;
 import picocli.CommandLine;
@@ -10,6 +11,7 @@ import picocli.CommandLine.Command;
          version = "adt-cli 1.0.0",
          description = "Android Development Tools - Project analysis and workspace generation",
          subcommands = {
+    ExploreCommand.class,
     ResolveCommand.class,
     WorkspaceCommand.class
 })
