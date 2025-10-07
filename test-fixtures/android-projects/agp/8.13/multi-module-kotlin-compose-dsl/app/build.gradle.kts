@@ -45,6 +45,8 @@ dependencies {
 
     implementation(project(":kotlin-android-library-one"))
     implementation(project(":kotlin-generic-library-one"))
+    implementation(project(":nested-modules-one:nested-kotlin-android-one"))
+    implementation(project(":nested-modules-one:nested-kotlin-generic-library-one"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

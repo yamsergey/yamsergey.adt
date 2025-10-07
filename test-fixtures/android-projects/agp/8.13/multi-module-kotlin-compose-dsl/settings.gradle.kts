@@ -23,3 +23,5 @@ rootProject.name = "Multi-Module-Kotlin-Compose"
 include(":app")
 include(":kotlin-android-library-one")
 include(":kotlin-generic-library-one")
+include(":nested-modules-one:nested-kotlin-android-one")
+include(":nested-modules-one:nested-kotlin-generic-library-one")

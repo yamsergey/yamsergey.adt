@@ -153,8 +153,6 @@ public class ProjectToWorkspaceConverter {
     allDependencies.add(Dependency.builder()
         .type(Dependency.DependencyType.module)
         .name(projectModule.name() + ".main")
-        .scope(Dependency.DependencyScope.compile)
-        .build());
 
     return Module.builder()
         .name(moduleName)
