@@ -1,0 +1,16 @@
+<configuration>
+  <!-- Console appender for general application output -->
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Suppress Gradle Tooling API noise -->
+  <logger name="org.gradle" level="WARN"/>
+
+  <!-- Root logger: default to WARN (quiet), user can set to DEBUG with verbose flag -->
+  <root level="WARN">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

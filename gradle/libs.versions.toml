@@ -12,6 +12,8 @@ gradle-core = "6.1.1"
 android-gradle-plugin = "8.11.1"
 lombok = "1.18.42"
 jackson = "2.19.0"
+slf4j = "2.0.9"
+logback = "1.4.14"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -36,6 +38,8 @@ sugar-lombok = { module = "org.projectlombok:lombok", version.ref = "lombok"}
 jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 [plugins]
 # Add plugins here as needed
