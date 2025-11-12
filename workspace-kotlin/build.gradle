@@ -51,6 +51,9 @@ java {
 tasks.named('test') {
     // Use JUnit Platform for unit tests.
     useJUnitPlatform()
+
+    // Pass test fixtures directory to tests
+    systemProperty 'testFixturesDir', testFixturesDir.absolutePath
 }
 
 publishing {

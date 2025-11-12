@@ -8,6 +8,11 @@
 allprojects {
     group = 'io.yamsergey.adt'
     version = '1.0.0'
+
+    // Test fixtures directory - available to all subprojects
+    ext {
+        testFixturesDir = rootProject.file('test-fixtures')
+    }
 }
 
 subprojects {
