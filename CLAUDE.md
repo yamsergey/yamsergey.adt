@@ -87,6 +87,32 @@ tools-android-cli resolve /path/to/project --raw --output data.json
 tools-android-cli resolve /path/to/project --workspace --output analysis.json
 ```
 
+### tools-android-drawables (Drawable Resources Library)
+Library for discovering and rendering Android drawable resources to images with markdown reports.
+
+**Package Structure:**
+- `model/` - `DrawableResource` with types (VECTOR_XML, BITMAP_PNG, etc.), tracks source set and qualifier
+- `resolver/` - `DrawableResourceResolver` - Discovers drawable resources from Android modules
+- `renderer/` - `VectorDrawableRenderer` - Converts Android vector drawable XML to PNG using Apache Batik
+- `report/` - `MarkdownReportGenerator` - Generates markdown documentation with drawable table
+
+**Key Features:**
+- Discovers drawable resources from `res/drawable*` folders using Gradle Tooling API
+- Converts Android vector drawable XML format to SVG, then renders to PNG
+- Supports qualifier-based drawables (hdpi, xxhdpi, night, etc.)
+- Tracks source sets (main, debug, release, flavors) for variant-specific drawables
+- Handles bitmap drawables (PNG, JPG, WEBP)
+- Generates comprehensive markdown reports with image previews
+- Resolves Android color references (@android:color/white, etc.)
+
+**How It Works:**
+1. Uses `SourceProvider.getResDirectories()` to find resource folders
+2. Scans all `drawable` and `drawable-*` folders across all source sets
+3. Identifies drawable types by file extension and extracts metadata (name, qualifier, source set)
+4. For vector drawables: converts Android XML → SVG → PNG via Apache Batik
+5. For bitmap drawables: copies files as-is
+6. Generates markdown table with image previews, grouping variants by resource name
+
 ### workspace-kotlin (Workspace Library)
 Converts tools-android `Project` model to workspace format for IDE integration.
 
@@ -102,15 +128,50 @@ CLI for generating workspace files from Android projects.
 - `App.java` - Main entry point
 - `GenerateCommand.java` - Workspace generation command
 
+### adt-cli (Unified CLI)
+Unified command-line interface combining all ADT functionality.
+
+**Commands:**
+- `resolve` - Analyze Android project structure and dependencies
+- `workspace` - Generate workspace.json for IDE integration
+- `drawables` - Generate images from Android drawable resources
+
+**Drawables Command Usage:**
+```bash
+# Generate images and markdown report from all drawable resources
+adt-cli drawables /path/to/android/project --output ./images
+
+# Only process vector drawables with report
+adt-cli drawables /path/to/android/project --vectors-only --output ./vectors
+
+# Specify module and custom dimensions
+adt-cli drawables /path/to/android/project --module app --width 512 --height 512
+
+# Custom report filename
+adt-cli drawables /path/to/android/project --output ./images --report DRAWABLES.md
+
+# Install and run
+./gradlew :adt-cli:installDist
+./adt-cli/build/install/adt-cli/bin/adt-cli drawables --help
+```
+
+**Markdown Report Features:**
+- Automatically generates `README.md` (or custom filename) in output directory
+- Table with drawable name, image preview, type, qualifiers, and source sets
+- Summary statistics by drawable type
+- Lists all source sets and qualifiers found
+- Relative image paths work when viewing in GitHub or any markdown viewer
+
 ## Dependencies and Technologies
 
 - **Gradle Tooling API 8.10.2** - Core Gradle project access
-- **Android Gradle Plugin 8.7.1** - Android-specific models
+- **Android Gradle Plugin 8.11.1** - Android-specific models
 - **Google Guava** - Utility collections
 - **Lombok** - Code generation for models (builders, getters)
 - **Jackson** - JSON serialization (CLI modules)
 - **Picocli** - CLI framework
 - **JUnit Jupiter** - Testing framework
+- **Apache Batik 1.17** - SVG rendering for vector drawable conversion (tools-android-drawables)
 
 ## Important Architecture Notes
 

@@ -1,0 +1,76 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+repositories {
+    mavenCentral()
+    google()
+    gradlePluginPortal()
+    maven { url = uri("https://repo.gradle.org/gradle/libs-releases") }
+}
+
+dependencies {
+    // Core tools-android library
+    api project(':tools-android')
+
+    // Apache Batik for SVG/Vector rendering
+    implementation 'org.apache.xmlgraphics:batik-transcoder:1.17'
+    implementation 'org.apache.xmlgraphics:batik-codec:1.17'
+
+    // Lombok
+    implementation libs.sugar.lombok
+    annotationProcessor libs.sugar.lombok
+
+    // Testing
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+
+            groupId = 'io.yamsergey.adt'
+            artifactId = 'tools-android-drawables'
+            version = '1.0.0'
+
+            pom {
+                name = 'Android Development Tools - Drawable Resources'
+                description = 'Library for discovering and rendering Android drawable resources'
+                url = 'https://github.com/yamsergey/yamsergey.adt'
+
+                licenses {
+                    license {
+                        name = 'GNU General Public License v3.0'
+                        url = 'https://www.gnu.org/licenses/gpl-3.0.en.html'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = 'yamsergey'
+                        name = 'Sergey Yamshchikov'
+                    }
+                }
+
+                scm {
+                    connection = 'scm:git:git://github.com/yamsergey/yamsergey.adt.git'
+                    developerConnection = 'scm:git:ssh://github.com/yamsergey/yamsergey.adt.git'
+                    url = 'https://github.com/yamsergey/yamsergey.adt'
+                }
+            }
+        }
+    }
+}
