@@ -16,6 +16,7 @@ application {
 dependencies {
     // Core libraries
     implementation project(':tools-android')
+    implementation project(':tools-android-drawables')
     implementation project(':workspace-kotlin')
 
     // CLI framework
