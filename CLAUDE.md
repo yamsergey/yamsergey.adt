@@ -60,6 +60,14 @@ Core library providing Android project analysis via Gradle Tooling API.
 - `inspect/` - Device and application inspection
   - `ViewHierarchyDumper` - Dumps UI hierarchy from connected Android devices using ADB
   - `ViewHierarchy` - Data model for captured view hierarchy
+  - `scroll/` - Scrolling screenshot capture
+    - `ScrollScreenshotCapture` - Orchestrates scrolling screenshot capture process
+    - `ScrollScreenshot` - Result model for captured scrolling screenshot
+    - `ImageStitcher` - Stitches multiple screenshots into one tall image
+    - `ImageOverlapDetector` - Detects overlap between consecutive screenshots using row hashing
+    - `RowHashCalculator` - Computes FNV-1a hashes for image rows
+    - `ScrollableViewFinder` - Finds scrollable views in UI hierarchy
+    - `AdbSwipeController` - Controls swipe gestures via ADB
 - `tools.sugar/` - `Result<T>` type (sealed interface: `Success<T>`, `Failure<T>`)
 
 **Key Design Patterns:**
@@ -77,6 +85,7 @@ Command-line interface wrapping tools-android library.
 - `drawable/DrawableCommand.java` - Vector drawable to PNG conversion
 - `inspect/InspectCommand.java` - Device inspection command (parent)
 - `inspect/LayoutCommand.java` - UI layout hierarchy dumping subcommand
+- `inspect/ScrollScreenshotCommand.java` - Scrolling screenshot capture subcommand
 - `serialization/jackson/` - Jackson customizations for safe Gradle object serialization (`SafeSerializerModifier`, `ParentIgnoreMixIn`, `ProjectMixIn`, `TaskMixIn`)
 
 **CLI Usage:**
@@ -98,6 +107,15 @@ adt-cli inspect layout --format json -o hierarchy.json
 
 # Capture screenshot
 adt-cli inspect screenshot -o screenshot.png
+
+# Capture scrolling/long screenshot
+adt-cli inspect scroll-screenshot -o long-screenshot.png
+
+# Scroll to top first, then capture
+adt-cli inspect scroll-screenshot --scroll-to-top -o long-screenshot.png
+
+# Target specific scrollable view and limit captures
+adt-cli inspect scroll-screenshot --view-id "com.app:id/recycler" --max-captures 10 -o long.png
 
 # Capture logcat logs
 adt-cli inspect logcat --lines 1000 -o logcat.txt

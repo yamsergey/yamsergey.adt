@@ -138,5 +138,16 @@ public class ViewNode {
         public int getCenterY() {
             return (top + bottom) / 2;
         }
+
+        /**
+         * Creates new bounds with the bottom edge moved up by the specified margin.
+         * Useful for excluding content that may be partially hidden behind overlays.
+         *
+         * @param margin Number of pixels to reduce from the bottom
+         * @return New Bounds with adjusted bottom
+         */
+        public Bounds withBottomMargin(int margin) {
+            return new Bounds(left, top, right, Math.max(top, bottom - margin));
+        }
     }
 }
