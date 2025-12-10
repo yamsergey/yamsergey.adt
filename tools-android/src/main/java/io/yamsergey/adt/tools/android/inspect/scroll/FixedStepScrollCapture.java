@@ -24,27 +24,22 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Captures scrolling screenshots using a fixed-geometry algorithm inspired by PGSSoft's approach.
+ * Captures scrolling screenshots using hash-based overlap detection and overwrite stitching.
  *
- * <p>This approach uses predictable geometry for seamless stitching:</p>
- * <ul>
- *   <li>Scroll exactly 50% of scrollable area height</li>
- *   <li>Skip exactly 25% from top of each subsequent screenshot (the overlap)</li>
- *   <li>Stack segments directly - no hash detection needed</li>
- * </ul>
- *
- * <p>The math ensures perfect alignment:</p>
- * <ul>
- *   <li>After scrolling 50%, content at position P moves to P - height/2</li>
- *   <li>The top 25% of new screenshot = bottom 25% of previous screenshot</li>
- *   <li>By skipping this overlap, segments align perfectly</li>
- * </ul>
+ * <p>Algorithm overview:</p>
+ * <ol>
+ *   <li>Scroll by 50% of scrollable area height</li>
+ *   <li>Use FNV-1a row hashing to detect actual overlap between screenshots</li>
+ *   <li>Use "overwrite" stitching - draw the new screenshot over the overlap region
+ *       so both sides of any seam come from the same image (eliminates visible seams)</li>
+ *   <li>Detect scroll end when 95% of row hashes match between consecutive captures</li>
+ * </ol>
  *
  * <p>Capture strategy:</p>
  * <ul>
- *   <li>First screenshot: full screenshot (includes static top bar)</li>
- *   <li>Subsequent screenshots: skip top 25% of scrollable area, use rest</li>
- *   <li>Last screenshot: extend to screen bottom (includes static bottom nav)</li>
+ *   <li>First screenshot: capture from top to bottom of scrollable area</li>
+ *   <li>Subsequent screenshots: detect overlap via hashing, overwrite overlap region</li>
+ *   <li>Last screenshot: extend to screen bottom to include static bottom navigation</li>
  * </ul>
  *
  * <p>Example usage:</p>
@@ -228,7 +223,6 @@ public class FixedStepScrollCapture {
 
             boolean reachedEnd = false;
             BufferedImage lastScreen = firstScreen;
-            int blendHeight = 20;  // Pixels to blend at seams
 
             // ============== SUBSEQUENT SCREENSHOTS ==============
             while (captureCount < maxCaptures) {
@@ -396,221 +390,6 @@ public class FixedStepScrollCapture {
         endY = Math.max(bounds.getTop() + margin, endY);
 
         return executeSwipe(centerX, startY, centerX, endY, swipeDurationMs);
-    }
-
-    /**
-     * Finds a uniform row (low color variance) near the target position.
-     * This helps avoid cutting through shadows, gradients, or visual elements.
-     *
-     * @param image The screenshot
-     * @param targetY The ideal cut position
-     * @param searchRange How many pixels above/below to search
-     * @return The Y coordinate of the most uniform row
-     */
-    private int findUniformRow(BufferedImage image, int targetY, int searchRange) {
-        int minY = Math.max(0, targetY - searchRange);
-        int maxY = Math.min(image.getHeight() - 1, targetY + searchRange);
-
-        int bestY = targetY;
-        double bestScore = Double.MAX_VALUE;
-
-        for (int y = minY; y <= maxY; y++) {
-            double variance = calculateRowVariance(image, y);
-            // Slight preference for rows closer to target
-            double distancePenalty = Math.abs(y - targetY) * 0.5;
-            double score = variance + distancePenalty;
-
-            if (score < bestScore) {
-                bestScore = score;
-                bestY = y;
-            }
-        }
-
-        return bestY;
-    }
-
-    /**
-     * Calculates color variance of a row (lower = more uniform).
-     */
-    private double calculateRowVariance(BufferedImage image, int y) {
-        int width = image.getWidth();
-        if (width == 0) return Double.MAX_VALUE;
-
-        int sampleStep = 8;  // Sample every 8th pixel
-        int samples = width / sampleStep;
-        if (samples < 2) return Double.MAX_VALUE;
-
-        long sumR = 0, sumG = 0, sumB = 0;
-        long sumR2 = 0, sumG2 = 0, sumB2 = 0;
-
-        for (int x = 0; x < width; x += sampleStep) {
-            int rgb = image.getRGB(x, y);
-            int r = (rgb >> 16) & 0xFF;
-            int g = (rgb >> 8) & 0xFF;
-            int b = rgb & 0xFF;
-
-            sumR += r; sumG += g; sumB += b;
-            sumR2 += r * r; sumG2 += g * g; sumB2 += b * b;
-        }
-
-        double varR = (sumR2 / (double) samples) - Math.pow(sumR / (double) samples, 2);
-        double varG = (sumG2 / (double) samples) - Math.pow(sumG / (double) samples, 2);
-        double varB = (sumB2 / (double) samples) - Math.pow(sumB / (double) samples, 2);
-
-        return varR + varG + varB;
-    }
-
-    /**
-     * Finds the best row to cut at by comparing pixels between the destination image
-     * and the new screenshot. Looks for a row with minimal pixel difference.
-     *
-     * @param destImage The image we've built so far
-     * @param srcImage The new screenshot
-     * @param destCurrentY Current Y position in destination (bottom of what we've drawn)
-     * @param scrollBounds Bounds of the scrollable area
-     * @param detectedOverlap Number of overlapping rows detected by hash comparison
-     * @return The Y coordinate in srcImage where we should start taking content
-     */
-    private int findBestCutRow(BufferedImage destImage, BufferedImage srcImage,
-                                int destCurrentY, ViewNode.Bounds scrollBounds, int detectedOverlap) {
-        int scrollTop = scrollBounds.getTop();
-        int scrollBottom = scrollBounds.getBottom();
-        int width = srcImage.getWidth();
-
-        // Search range: from 20% into the overlap to 80% into the overlap
-        // This avoids cutting too close to edges
-        int searchStart = scrollTop + (int)(detectedOverlap * 0.2);
-        int searchEnd = scrollTop + (int)(detectedOverlap * 0.8);
-
-        // Ensure valid range
-        searchStart = Math.max(scrollTop + 10, searchStart);
-        searchEnd = Math.min(scrollBottom - 10, searchEnd);
-
-        if (searchEnd <= searchStart) {
-            // Fallback to middle of detected overlap
-            return scrollTop + detectedOverlap / 2;
-        }
-
-        int bestRow = searchStart;
-        long bestDiff = Long.MAX_VALUE;
-
-        // For each candidate row in the source image
-        for (int srcY = searchStart; srcY < searchEnd; srcY++) {
-            // Calculate corresponding Y in destination
-            // Content at srcY in new image = content at (destCurrentY - overlap + srcY - scrollTop) in dest
-            // Simplified: destY = destCurrentY - (scrollBottom - srcY)
-            int destY = destCurrentY - (scrollBottom - srcY);
-
-            if (destY < 0 || destY >= destImage.getHeight()) {
-                continue;
-            }
-
-            // Compare this row between source and destination
-            long diff = compareRows(destImage, srcImage, destY, srcY, width);
-
-            if (diff < bestDiff) {
-                bestDiff = diff;
-                bestRow = srcY;
-
-                // If we find an exact match, use it immediately
-                if (diff == 0) {
-                    break;
-                }
-            }
-        }
-
-        return bestRow;
-    }
-
-    /**
-     * Compares two rows of pixels and returns the total difference.
-     */
-    private long compareRows(BufferedImage img1, BufferedImage img2, int y1, int y2, int width) {
-        long totalDiff = 0;
-
-        // Sample every 4th pixel for speed
-        for (int x = 0; x < width; x += 4) {
-            int rgb1 = img1.getRGB(x, y1);
-            int rgb2 = img2.getRGB(x, y2);
-
-            int r1 = (rgb1 >> 16) & 0xFF;
-            int g1 = (rgb1 >> 8) & 0xFF;
-            int b1 = rgb1 & 0xFF;
-
-            int r2 = (rgb2 >> 16) & 0xFF;
-            int g2 = (rgb2 >> 8) & 0xFF;
-            int b2 = rgb2 & 0xFF;
-
-            totalDiff += Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
-        }
-
-        return totalDiff;
-    }
-
-    /**
-     * Draws a segment with alpha blending at the top edge to smooth seams.
-     * This helps hide visible lines when cutting through shadows or gradients.
-     */
-    private void drawWithBlending(Graphics2D g2d, BufferedImage source, int destY,
-                                   int srcTop, int srcBottom, int width, int blendHeight) {
-        int segmentHeight = srcBottom - srcTop;
-
-        // If segment is too small for blending, just draw normally
-        if (segmentHeight <= blendHeight * 2) {
-            g2d.drawImage(source,
-                0, destY, width, destY + segmentHeight,
-                0, srcTop, width, srcBottom,
-                null);
-            return;
-        }
-
-        // Draw the main part (after blend zone) normally
-        g2d.drawImage(source,
-            0, destY + blendHeight, width, destY + segmentHeight,
-            0, srcTop + blendHeight, width, srcBottom,
-            null);
-
-        // Draw the blend zone with alpha gradient
-        for (int i = 0; i < blendHeight; i++) {
-            float alpha = (float) i / blendHeight;  // 0.0 at top, 1.0 at bottom
-
-            int srcY = srcTop + i;
-            int dstY = destY + i;
-
-            // Get pixels from source
-            int[] srcPixels = new int[width];
-            source.getRGB(0, srcY, width, 1, srcPixels, 0, width);
-
-            // Get existing pixels from destination (for blending)
-            int[] dstPixels = new int[width];
-            // Read from the result image at the position where we're blending
-            // This assumes the previous segment already drew there
-
-            // Blend and draw
-            for (int x = 0; x < width; x++) {
-                int srcRGB = srcPixels[x];
-                int srcR = (srcRGB >> 16) & 0xFF;
-                int srcG = (srcRGB >> 8) & 0xFF;
-                int srcB = srcRGB & 0xFF;
-
-                // Create blended pixel (blend with existing content)
-                // For simplicity, we use the source with alpha applied
-                int newR = (int)(srcR * alpha + srcR * (1 - alpha));
-                int newG = (int)(srcG * alpha + srcG * (1 - alpha));
-                int newB = (int)(srcB * alpha + srcB * (1 - alpha));
-
-                srcPixels[x] = (0xFF << 24) | (newR << 16) | (newG << 8) | newB;
-            }
-
-            // Draw the blended row
-            BufferedImage rowImage = new BufferedImage(width, 1, BufferedImage.TYPE_INT_ARGB);
-            rowImage.setRGB(0, 0, width, 1, srcPixels, 0, width);
-
-            java.awt.Composite oldComposite = g2d.getComposite();
-            g2d.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, alpha));
-            g2d.drawImage(rowImage, 0, dstY, null);
-            g2d.setComposite(oldComposite);
-        }
     }
 
     /**
