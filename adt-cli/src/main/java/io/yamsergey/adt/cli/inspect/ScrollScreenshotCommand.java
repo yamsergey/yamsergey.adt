@@ -1,5 +1,6 @@
 package io.yamsergey.adt.cli.inspect;
 
+import io.yamsergey.adt.tools.android.inspect.scroll.FixedStepScrollCapture;
 import io.yamsergey.adt.tools.android.inspect.scroll.ScrollScreenshot;
 import io.yamsergey.adt.tools.android.inspect.scroll.ScrollScreenshotCapture;
 import io.yamsergey.adt.tools.sugar.Failure;
@@ -104,6 +105,16 @@ public class ScrollScreenshotCommand implements Callable<Integer> {
             description = "Save individual captures for debugging overlap detection.")
     private boolean debugMode;
 
+    @Option(names = {"--fixed-step"},
+            description = "Use fixed-step algorithm instead of hash-based overlap detection. " +
+                         "More predictable but may have minor alignment issues.")
+    private boolean fixedStep;
+
+    @Option(names = {"--scroll-step"},
+            description = "Scroll step in pixels for fixed-step mode (default: 400). " +
+                         "Smaller values = more reliable but more captures.")
+    private Integer scrollStepPixels;
+
     @Override
     public Integer call() throws Exception {
         // Determine output path
@@ -183,7 +194,51 @@ public class ScrollScreenshotCommand implements Callable<Integer> {
             System.err.println("Will scroll to top first");
         }
 
-        Result<ScrollScreenshot> result = builder.build().capture();
+        Result<ScrollScreenshot> result;
+
+        if (fixedStep) {
+            // Use fixed-step algorithm
+            System.err.println("Using fixed-step algorithm");
+            FixedStepScrollCapture.FixedStepScrollCaptureBuilder fixedBuilder = FixedStepScrollCapture.builder()
+                    .outputFile(outputFile)
+                    .scrollToTop(scrollToTop);
+
+            if (deviceSerial != null && !deviceSerial.isEmpty()) {
+                fixedBuilder.deviceSerial(deviceSerial);
+            }
+            if (viewId != null && !viewId.isEmpty()) {
+                fixedBuilder.targetViewId(viewId);
+            }
+            if (scrollToTopSwipes != null && scrollToTopSwipes > 0) {
+                fixedBuilder.scrollToTopSwipes(scrollToTopSwipes);
+            }
+            if (delayMs != null && delayMs > 0) {
+                fixedBuilder.scrollDelayMs(delayMs);
+            }
+            if (maxCaptures != null && maxCaptures > 0) {
+                fixedBuilder.maxCaptures(maxCaptures);
+            }
+            if (scrollStepPixels != null && scrollStepPixels > 0) {
+                fixedBuilder.scrollStep(scrollStepPixels);
+            }
+            if (swipeDurationMs != null && swipeDurationMs > 0) {
+                fixedBuilder.swipeDurationMs(swipeDurationMs);
+            }
+            if (timeoutSeconds != null && timeoutSeconds > 0) {
+                fixedBuilder.timeoutSeconds(timeoutSeconds);
+            }
+            if (adbPath != null && !adbPath.isEmpty()) {
+                fixedBuilder.adbPath(adbPath);
+            }
+            if (debugMode) {
+                fixedBuilder.debugMode(true);
+            }
+
+            result = fixedBuilder.build().capture();
+        } else {
+            // Use hash-based overlap detection algorithm
+            result = builder.build().capture();
+        }
 
         return switch (result) {
             case Success<ScrollScreenshot> success -> {
