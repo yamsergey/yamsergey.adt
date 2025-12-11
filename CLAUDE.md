@@ -61,9 +61,10 @@ Core library providing Android project analysis via Gradle Tooling API.
   - `ViewHierarchyDumper` - Dumps UI hierarchy from connected Android devices using ADB
   - `ViewHierarchy` - Data model for captured view hierarchy
   - `scroll/` - Scrolling screenshot capture
-    - `ScrollScreenshotCapture` - Orchestrates scrolling screenshot capture process
+    - `ScrollScreenshotCapture` - Orchestrates hash-based scrolling screenshot capture
+    - `FixedStepScrollCapture` - Alternative fixed-step algorithm for predictable scrolling
     - `ScrollScreenshot` - Result model for captured scrolling screenshot
-    - `ImageStitcher` - Stitches multiple screenshots into one tall image
+    - `ImageStitcher` - Stitches multiple screenshots into one tall image with optional blending
     - `ImageOverlapDetector` - Detects overlap between consecutive screenshots using row hashing
     - `RowHashCalculator` - Computes FNV-1a hashes for image rows
     - `ScrollableViewFinder` - Finds scrollable views in UI hierarchy
@@ -116,6 +117,12 @@ adt-cli inspect scroll-screenshot --scroll-to-top -o long-screenshot.png
 
 # Target specific scrollable view and limit captures
 adt-cli inspect scroll-screenshot --view-id "com.app:id/recycler" --max-captures 10 -o long.png
+
+# Use fixed-step algorithm (more predictable, may have minor alignment issues)
+adt-cli inspect scroll-screenshot --fixed-step --scroll-step 400 -o long.png
+
+# Debug mode - saves individual captures for troubleshooting
+adt-cli inspect scroll-screenshot --scroll-to-top --debug -o long.png
 
 # Capture logcat logs
 adt-cli inspect logcat --lines 1000 -o logcat.txt
@@ -174,6 +181,30 @@ Modules are resolved through a strategy pattern:
 
 ### Build Variant Handling
 Android modules require a build variant context for dependency resolution. The default is "debug". Raw project resolution requires explicitly specifying a `BuildVariant`.
+
+### Scrolling Screenshot Algorithm
+The `ScrollScreenshotCapture` uses a hash-based overlap detection algorithm:
+
+1. **View Discovery**: Dumps UI hierarchy via ADB to find scrollable views (RecyclerView, ScrollView, etc.)
+2. **Static Region Capture**: Captures top bar and bottom navigation from first screenshot to preserve in final image
+3. **Scroll Loop**: For each capture:
+   - Takes screenshot and computes FNV-1a row hashes for the scrollable region
+   - Compares with previous screenshot to detect overlap using `ImageOverlapDetector`
+   - Adds unique (non-overlapping) rows to the stitcher
+   - Swipes up to scroll content
+4. **Scroll End Detection**: Stops when:
+   - Images are 98%+ identical (content didn't scroll)
+   - Unique rows ≤10 (almost complete overlap)
+   - No overlap found but >50% image similarity (minimal scroll near bottom)
+5. **Final Stitching**: Combines all segments with static regions using `ImageStitcher`
+
+**Key Parameters:**
+- `swipeRatio` (default 0.5): Portion of scrollable height to swipe per scroll
+- `scrollDelayMs` (default 500): Wait time after each swipe for content to settle
+- `MATCH_THRESHOLD` (70%): Minimum matching rows ratio to accept an overlap
+- Bottom margin (20px): Applied to scrollable bounds to exclude partially visible content
+
+**Alternative Algorithm**: `FixedStepScrollCapture` uses a fixed pixel step instead of hash-based detection, which is more predictable but may have minor alignment issues.
 
 ## Development Notes
 

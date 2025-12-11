@@ -221,8 +221,8 @@ public class ScrollScreenshotCapture {
                     // Check for scroll end
                     if (overlapDetector.isScrollEnd(prevHashes, currHashes)) {
                         reachedEnd = true;
-                        // Use original bounds for last segment to capture full content
-                        lastScreenshot = screenshot;
+                        // Don't add this segment - it's essentially identical to the previous one
+                        // The previous segment already has all the content
                         break;
                     }
 
@@ -233,24 +233,58 @@ public class ScrollScreenshotCapture {
                     if (overlapOpt.isPresent()) {
                         // Add unique portion from current screenshot
                         int overlapRows = overlapOpt.get().overlapRows();
+                        int uniqueRows = currHashes.length - overlapRows;
                         if (debugMode) {
                             System.err.printf("Capture %d: overlap=%d rows (%.1f%% match), unique=%d rows%n",
                                 captureCount, overlapRows, overlapOpt.get().matchRatio() * 100,
-                                currHashes.length - overlapRows);
+                                uniqueRows);
                         }
-                        stitcher.addSegmentWithOverlap(screenshot, bounds, overlapRows);
-                        // Track for potential last segment adjustment
-                        lastScreenshot = screenshot;
-                        lastOverlapRows = overlapRows;
+                        // Only add if there are meaningful unique rows
+                        if (uniqueRows > 10) {
+                            stitcher.addSegmentWithOverlap(screenshot, bounds, overlapRows);
+                            // Track for potential last segment adjustment
+                            lastScreenshot = screenshot;
+                            lastOverlapRows = overlapRows;
+                        } else {
+                            // Almost no unique content - treat as scroll end
+                            if (debugMode) {
+                                System.err.printf("Capture %d: only %d unique rows, treating as scroll end%n",
+                                    captureCount, uniqueRows);
+                            }
+                            reachedEnd = true;
+                            break;
+                        }
                     } else {
-                        // No overlap found - might be a completely new screen
-                        // Add full scrollable region (this is unusual)
-                        if (debugMode) {
-                            System.err.printf("Capture %d: NO OVERLAP FOUND, adding full region%n", captureCount);
+                        // No overlap found - this shouldn't happen in normal scrolling
+                        // The images are likely almost identical (scroll end) or completely different
+                        // Check similarity to decide
+                        int matchingRows = 0;
+                        for (int i = 0; i < Math.min(prevHashes.length, currHashes.length); i++) {
+                            if (prevHashes[i] == currHashes[i]) {
+                                matchingRows++;
+                            }
                         }
-                        stitcher.addFirstSegment(screenshot, bounds);
-                        lastScreenshot = screenshot;
-                        lastOverlapRows = 0;
+                        double similarityRatio = (double) matchingRows / Math.max(prevHashes.length, currHashes.length);
+
+                        if (similarityRatio > 0.5) {
+                            // Images are very similar - we've likely reached scroll end
+                            // with minimal scroll movement
+                            if (debugMode) {
+                                System.err.printf("Capture %d: NO OVERLAP FOUND but %.1f%% similar, treating as scroll end%n",
+                                    captureCount, similarityRatio * 100);
+                            }
+                            reachedEnd = true;
+                            break;
+                        } else {
+                            // Truly different content - add full region (unlikely in normal use)
+                            if (debugMode) {
+                                System.err.printf("Capture %d: NO OVERLAP FOUND and only %.1f%% similar, adding full region%n",
+                                    captureCount, similarityRatio * 100);
+                            }
+                            stitcher.addFirstSegment(screenshot, bounds);
+                            lastScreenshot = screenshot;
+                            lastOverlapRows = 0;
+                        }
                     }
                 } else {
                     // First screenshot - add entire scrollable region
@@ -284,7 +318,8 @@ public class ScrollScreenshotCapture {
 
             // Replace last segment with original bounds to capture full content at the bottom
             // This ensures we don't cut off content that was excluded by the bottom margin
-            if (lastScreenshot != null && captureCount > 1) {
+            // Only do this if we actually reached the end (otherwise we might cut off in the middle)
+            if (reachedEnd && lastScreenshot != null && captureCount > 1) {
                 stitcher.replaceLastSegment(lastScreenshot, originalBounds, lastOverlapRows);
                 if (debugMode) {
                     System.err.printf("Replaced last segment with original bounds (added %d extra rows)%n",
