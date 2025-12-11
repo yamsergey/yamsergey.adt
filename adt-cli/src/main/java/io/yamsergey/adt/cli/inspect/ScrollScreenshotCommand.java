@@ -45,7 +45,8 @@ import java.util.concurrent.Callable;
  * </pre>
  */
 @Command(name = "scroll-screenshot",
-         description = "Capture scrolling/long screenshot of scrollable content.")
+         description = "Capture scrolling/long screenshot of scrollable content. " +
+                       "Uses hash-based overlap detection by default for seamless stitching.")
 public class ScrollScreenshotCommand implements Callable<Integer> {
 
     @Parameters(index = "0",
@@ -106,8 +107,9 @@ public class ScrollScreenshotCommand implements Callable<Integer> {
     private boolean debugMode;
 
     @Option(names = {"--fixed-step"},
-            description = "Use fixed-step algorithm instead of hash-based overlap detection. " +
-                         "More predictable but may have minor alignment issues.")
+            description = "Use fixed-step algorithm instead of hash-based overlap detection (default). " +
+                         "Hash-based is recommended for seamless stitching. " +
+                         "Fixed-step is more predictable but may have minor alignment issues.")
     private boolean fixedStep;
 
     @Option(names = {"--scroll-step"},
