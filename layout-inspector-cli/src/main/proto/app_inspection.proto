@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package app_inspection;
+
+option java_package = "com.android.tools.app.inspection";
+option java_outer_classname = "AppInspection";
+option java_multiple_files = true;
+
+message AppInspectionCommand {
+  string inspector_id = 1;
+  uint32 command_id = 2;
+
+  oneof union {
+    CreateInspectorCommand create_inspector_command = 3;
+    DisposeInspectorCommand dispose_inspector_command = 4;
+    RawCommand raw_inspector_command = 5;
+    CancellationCommand cancellation_command = 6;
+    GetLibraryCompatibilityInfoCommand get_library_compatibility_info_command = 7;
+  }
+}
+
+message CreateInspectorCommand {
+  string dex_path = 1;
+  LaunchMetadata launch_metadata = 2;
+}
+
+message ArtifactCoordinate {
+  string group_id = 1;
+  string artifact_id = 2;
+  string version = 3;
+}
+
+message LibraryCompatibility {
+  ArtifactCoordinate coordinate = 1;
+  repeated string expected_library_class_names = 2;
+}
+
+message LaunchMetadata {
+  string launched_by_name = 1;
+  bool force = 2;
+  LibraryCompatibility min_library = 3;
+}
+
+message DisposeInspectorCommand {}
+
+message AppInspectionPayload {
+  bytes chunk = 1;
+  uint32 chunk_count = 2;
+  uint32 chunk_index = 3;
+}
+
+message RawCommand {
+  bytes content = 1;
+}
+
+message CancellationCommand {
+  uint32 cancelled_command_id = 1;
+}
+
+message GetLibraryCompatibilityInfoCommand {
+  repeated LibraryCompatibility target_libraries = 1;
+}
+
+message AppInspectionResponse {
+  enum Status {
+    SUCCESS = 0;
+    ERROR = 1;
+  }
+
+  uint32 command_id = 1;
+  Status status = 2;
+  string error_message = 3;
+
+  oneof union {
+    CreateInspectorResponse create_inspector_response = 4;
+    DisposeInspectorResponse dispose_inspector_response = 5;
+    RawResponse raw_response = 6;
+    GetLibraryCompatibilityInfoResponse get_library_compatibility_response = 7;
+  }
+}
+
+message CreateInspectorResponse {
+  enum Status {
+    SUCCESS = 0;
+    GENERIC_SERVICE_ERROR = 1;
+    VERSION_INCOMPATIBLE = 2;
+    VERSION_MISSING = 3;
+    LIBRARY_MISSING = 4;
+    APP_PROGUARDED = 5;
+  }
+  Status status = 1;
+}
+
+message DisposeInspectorResponse {}
+
+message LibraryCompatibilityInfo {
+  enum Status {
+    COMPATIBLE = 0;
+    INCOMPATIBLE = 1;
+    VERSION_MISSING = 2;
+    LIBRARY_MISSING = 3;
+    APP_PROGUARDED = 4;
+    SERVICE_ERROR = 5;
+  }
+  Status status = 1;
+  ArtifactCoordinate target_library = 2;
+  string version = 3;
+  string error_message = 4;
+}
+
+message GetLibraryCompatibilityInfoResponse {
+  repeated LibraryCompatibilityInfo responses = 1;
+}
+
+message RawResponse {
+  oneof data {
+    bytes content = 1;
+    int64 payload_id = 2;
+  }
+}
+
+message AppInspectionEvent {
+  string inspector_id = 1;
+
+  oneof union {
+    RawEvent raw_event = 2;
+    DisposedEvent disposed_event = 3;
+  }
+}
+
+message RawEvent {
+  oneof data {
+    bytes content = 1;
+    int64 payload_id = 2;
+  }
+}
+
+message DisposedEvent {
+  string error_message = 1;
+}

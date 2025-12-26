@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package layoutinspector.snapshots;
+
+option java_package = "layoutinspector.snapshots";
+option java_multiple_files = true;
+
+import "compose_layout_inspection.proto";
+import "view_layout_inspection.proto";
+
+// Metadata for the snapshot
+message Metadata {
+  uint32 api_level = 1;
+  string process_name = 2;
+  bool contains_compose = 3;
+  bool live_during_capture = 4;
+
+  enum Source {
+    UNKNOWN = 0;
+    STUDIO = 1;
+    CLI = 2;
+  }
+
+  Source source = 5;
+  string source_version = 6;
+  uint32 dpi = 7;
+  float font_scale = 8;
+  uint32 screen_width = 9;
+  uint32 screen_height = 10;
+
+  // Folder Config and theme for legacy inspector
+  string folder_config = 11;
+  string theme = 12;
+}
+
+message Rect {
+  int32 x = 1;
+  int32 y = 2;
+  int32 w = 3;
+  int32 h = 4;
+}
+
+message Snapshot {
+  layoutinspector.view.inspection.CaptureSnapshotResponse view_snapshot = 1;
+
+  message ComposeInfo {
+    int64 view_id = 1;
+    layoutinspector.compose.inspection.GetComposablesResponse composables = 2;
+    layoutinspector.compose.inspection.GetAllParametersResponse compose_parameters = 3;
+  }
+  repeated ComposeInfo compose_info = 2;
+
+  layoutinspector.view.inspection.FoldEvent fold_info = 3;
+}

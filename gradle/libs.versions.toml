@@ -13,6 +13,12 @@ android-gradle-plugin = "8.11.1"
 lombok = "1.18.42"
 jackson = "2.19.0"
 batik = "1.18"
+kotlin = "2.0.21"
+kotlinx-coroutines = "1.9.0"
+grpc = "1.68.1"
+grpc-kotlin = "1.4.1"
+protobuf = "4.28.3"
+ddmlib = "31.7.2"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -39,8 +45,18 @@ jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", ver
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 batik-transcoder = { module = "org.apache.xmlgraphics:batik-transcoder", version.ref = "batik" }
 batik-codec = { module = "org.apache.xmlgraphics:batik-codec", version.ref = "batik" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+grpc-netty = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
+grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
+grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
+grpc-kotlin-stub = { module = "io.grpc:grpc-kotlin-stub", version.ref = "grpc-kotlin" }
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protobuf-kotlin = { module = "com.google.protobuf:protobuf-kotlin", version.ref = "protobuf" }
+ddmlib = { module = "com.android.tools.ddms:ddmlib", version.ref = "ddmlib" }
 
 [plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+protobuf-gradle = { id = "com.google.protobuf", version = "0.9.4" }
 # Add plugins here as needed
 
 [bundles]

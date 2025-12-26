@@ -1,0 +1,301 @@
+syntax = "proto3";
+
+package profiler.proto;
+
+option java_package = "com.android.tools.profiler.proto";
+option java_multiple_files = true;
+
+import "app_inspection.proto";
+
+// Common configuration shared between daemon and agent
+message CommonConfig {
+  enum SocketType {
+    UNSPECIFIED_SOCKET = 0;
+    ABSTRACT_SOCKET = 1;
+  }
+  SocketType socket_type = 1;
+  string service_address = 2;
+  string service_socket_name = 3;
+}
+
+// Configuration for the transport daemon
+message DaemonConfig {
+  CommonConfig common = 1;
+}
+
+// Configuration for the JVMTI agent
+message AgentConfig {
+  enum AttachAgentMethod {
+    UNSPECIFIED = 0;
+    INSTANT = 1;
+    ON_COMMAND = 2;
+  }
+
+  message MemoryConfig {
+    int32 max_stack_depth = 1;
+    bool track_global_jni_refs = 2;
+    string app_dir = 3;
+  }
+
+  CommonConfig common = 1;
+  MemoryConfig mem = 2;
+  bool cpu_api_tracing_enabled = 3;
+  AttachAgentMethod attach_method = 4;
+  Command.CommandType attach_command = 5;
+}
+
+// Transport Service - exposed by the transport daemon on device
+service TransportService {
+  rpc GetVersion(VersionRequest) returns (VersionResponse);
+  rpc GetDevices(GetDevicesRequest) returns (GetDevicesResponse);
+  rpc GetProcesses(GetProcessesRequest) returns (GetProcessesResponse);
+  rpc GetAgentStatus(AgentStatusRequest) returns (AgentData);
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  rpc GetEvents(GetEventsRequest) returns (stream Event);
+  rpc GetEventGroups(GetEventGroupsRequest) returns (GetEventGroupsResponse);
+}
+
+// Streaming events request
+message GetEventsRequest {
+  int64 stream_id = 1;
+  int64 from_timestamp = 2;
+  int64 to_timestamp = 3;
+}
+
+// Version
+message VersionRequest {}
+message VersionResponse {
+  string version = 1;
+}
+
+// Devices
+message GetDevicesRequest {}
+message GetDevicesResponse {
+  repeated Device device = 1;
+}
+
+message Device {
+  int64 device_id = 1;
+  string serial = 2;
+  string model = 3;
+  string version = 4;
+  int32 api_level = 5;
+  int32 feature_level = 6;
+  string codename = 7;
+  string manufacturer = 8;
+  bool is_emulator = 9;
+  enum State {
+    UNSPECIFIED = 0;
+    ONLINE = 1;
+    OFFLINE = 2;
+    DISCONNECTED = 3;
+  }
+  State state = 10;
+}
+
+// Processes
+message GetProcessesRequest {
+  int64 device_id = 1;
+}
+
+message GetProcessesResponse {
+  repeated Process process = 1;
+}
+
+message Process {
+  int64 device_id = 1;
+  int32 pid = 2;
+  string name = 3;
+  enum State {
+    UNSPECIFIED = 0;
+    ALIVE = 1;
+    DEAD = 2;
+  }
+  State state = 4;
+  int64 start_timestamp_ns = 5;
+  string abi_cpu_arch = 6;
+  enum ExposureLevel {
+    UNKNOWN = 0;
+    DEBUGGABLE = 1;
+    PROFILEABLE = 2;
+    RELEASE = 3;
+  }
+  ExposureLevel exposure_level = 7;
+}
+
+// Agent Status
+message AgentStatusRequest {
+  int64 device_id = 1;
+  int32 pid = 2;
+}
+
+message AgentData {
+  enum Status {
+    UNSPECIFIED = 0;
+    ATTACHED = 1;
+    UNATTACHABLE = 2;
+    DETACHED = 3;
+  }
+  Status status = 1;
+}
+
+// Command execution
+message ExecuteRequest {
+  Command command = 1;
+}
+
+message ExecuteResponse {
+  // Empty response, results come via events
+}
+
+message Command {
+  enum CommandType {
+    UNSPECIFIED = 0;
+    ATTACH_AGENT = 10;
+    DETACH_AGENT = 11;
+    SEND_BYTES = 12;
+    BEGIN_SESSION = 13;
+    END_SESSION = 14;
+    ECHO = 100;
+    HEAP_DUMP = 200;
+    GC = 201;
+    GET_ALLOCATION_TRACKING_STATUS = 202;
+    TRACK_ALLOCATIONS = 203;
+    STOP_TRACE = 700;
+    START_TRACE = 701;
+    DISCOVER_CPU_CORES = 702;
+    DISCOVER_CPU_FREQUENCIES = 703;
+    START_STARTUP_PROFILING = 704;
+    STOP_STARTUP_PROFILING = 705;
+    START_CPU_TRACE = 706;
+    STOP_CPU_TRACE = 707;
+    APP_INSPECTION = 1200;
+  }
+  int64 stream_id = 1;
+  CommandType type = 2;
+  int32 pid = 3;
+  int32 command_id = 4;
+  int64 session_id = 5;
+
+  oneof union {
+    AttachAgent attach_agent = 10;
+    DetachAgent detach_agent = 11;
+    SendBytes send_bytes = 12;
+    BeginSession begin_session = 13;
+    EndSession end_session = 14;
+    HeapDump heap_dump = 200;
+    TrackAllocations track_allocations = 203;
+    Gc gc = 201;
+    StopCpuTrace stop_cpu_trace = 707;
+    StartCpuTrace start_cpu_trace = 706;
+    app_inspection.AppInspectionCommand app_inspection_command = 1200;
+  }
+}
+
+message AttachAgent {
+  string agent_lib_file_name = 1;
+  string agent_config_path = 2;
+  string package_name = 3;
+}
+
+message DetachAgent {
+  int32 pid = 1;
+}
+
+message SendBytes {
+  bytes bytes = 1;
+}
+
+message BeginSession {
+  int64 session_id = 1;
+  int32 pid = 2;
+  string process_name = 3;
+  bool request_process_start = 4;
+  int64 process_abi = 5;
+  bool jvmti_agent_enabled = 6;
+  bool live_alloc_enabled = 7;
+  bool live_alloc_sampling_rate = 8;
+}
+
+message EndSession {
+  int64 session_id = 1;
+}
+
+message HeapDump {
+  bool continuous = 1;
+}
+
+message TrackAllocations {
+  bool enabled = 1;
+  bool legacy = 2;
+}
+
+message Gc {}
+
+message StopCpuTrace {
+  int64 trace_id = 1;
+  string trace_name = 2;
+}
+
+message StartCpuTrace {
+  int64 trace_id = 1;
+  string trace_name = 2;
+}
+
+// Events
+message GetEventGroupsRequest {
+  int64 stream_id = 1;
+  Event.Kind kind = 2;
+  int64 from_timestamp = 3;
+  int64 to_timestamp = 4;
+}
+
+message GetEventGroupsResponse {
+  repeated EventGroup groups = 1;
+}
+
+message EventGroup {
+  int64 group_id = 1;
+  repeated Event events = 2;
+}
+
+message Event {
+  enum Kind {
+    NONE = 0;
+    STREAM = 1;
+    PROCESS = 2;
+    AGENT = 3;
+    SESSION = 101;
+    ECHO = 1000;
+    LAYOUT_INSPECTOR_FOREGROUND_PROCESS = 1101;
+    APP_INSPECTION_EVENT = 1201;
+    APP_INSPECTION_RESPONSE = 1202;
+    APP_INSPECTION_PAYLOAD = 1203;
+  }
+  int32 pid = 1;
+  int64 group_id = 2;
+  Kind kind = 3;
+  int64 timestamp = 4;
+  bool is_ended = 5;
+  int32 command_id = 6;
+
+  oneof union {
+    AgentData agent_data = 100;
+    app_inspection.AppInspectionEvent app_inspection_event = 1201;
+    app_inspection.AppInspectionResponse app_inspection_response = 1202;
+  }
+}
+
+// Stream (represents a device connection)
+message Stream {
+  int64 stream_id = 1;
+  enum Type {
+    UNSPECIFIED_STREAM_TYPE = 0;
+    DEVICE = 1;
+    FILE = 2;
+  }
+  Type type = 2;
+  Device device = 3;
+}
+
+// App Inspection types are defined in app_inspection.proto

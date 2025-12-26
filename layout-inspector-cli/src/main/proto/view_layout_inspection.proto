@@ -1,0 +1,268 @@
+syntax = "proto3";
+
+package layoutinspector.view.inspection;
+
+option java_package = "com.android.tools.idea.layoutinspector.view.inspection";
+option java_outer_classname = "LayoutInspectorViewProtocol";
+option java_multiple_files = true;
+
+// Main command wrapper - all commands are sent through this
+message Command {
+  oneof specialized {
+    StartFetchCommand start_fetch_command = 1;
+    StopFetchCommand stop_fetch_command = 2;
+    GetPropertiesCommand get_properties_command = 3;
+    CaptureSnapshotCommand capture_snapshot_command = 4;
+    EnableBitmapScreenshotCommand enable_bitmap_screenshot_command = 5;
+    UpdateScreenshotTypeCommand update_screenshot_type_command = 6;
+    EnableXrInspectionCommand enable_xr_inspection_command = 7;
+  }
+}
+
+// Main response wrapper - field numbers match Command field numbers
+message Response {
+  oneof specialized {
+    StartFetchResponse start_fetch_response = 1;
+    // StopFetchCommand (field 2 in Command) has no response
+    GetPropertiesResponse get_properties_response = 3;
+    // CaptureSnapshotCommand is field 4 in Command, so response is also field 4
+    CaptureSnapshotResponse capture_snapshot_response = 4;
+  }
+}
+
+// Main event wrapper - events are streamed from device
+// Field numbers match the device protocol
+message Event {
+  oneof specialized {
+    ErrorEvent error_event = 1;
+    WindowRootsEvent roots_event = 2;
+    LayoutEvent layout_event = 3;
+    PropertiesEvent properties_event = 4;
+    ProgressEvent progress_event = 5;
+    FoldEvent fold_event = 6;
+  }
+}
+
+// Commands
+
+message StartFetchCommand {
+  bool continuous = 1;
+}
+
+message StopFetchCommand {
+}
+
+message GetPropertiesCommand {
+  int64 root_view_id = 1;
+  int64 view_id = 2;
+}
+
+message CaptureSnapshotCommand {
+  Screenshot.Type screenshot_type = 1;
+}
+
+message EnableBitmapScreenshotCommand {
+  bool enable = 1;
+}
+
+message UpdateScreenshotTypeCommand {
+  Screenshot.Type type = 1;
+  float scale = 2;
+}
+
+message EnableXrInspectionCommand {
+  bool enable = 1;
+}
+
+// Responses
+
+message StartFetchResponse {
+  string error = 1;
+  ErrorCode code = 2;
+
+  enum ErrorCode {
+    OK = 0;
+    UNKNOWN_ERROR = 1;
+    NO_HARDWARE_ACCELERATION = 2;
+  }
+}
+
+message GetPropertiesResponse {
+  int64 root_view_id = 1;
+  int64 view_id = 2;
+  PropertyGroup property_group = 3;
+}
+
+message CaptureSnapshotResponse {
+  // Nested WindowSnapshot for snapshots
+  message WindowSnapshot {
+    LayoutEvent layout = 1;
+    PropertiesEvent properties = 2;
+  }
+  repeated WindowSnapshot window_snapshots = 1;
+  WindowRootsEvent window_roots = 2;
+}
+
+// Events
+
+message LayoutEvent {
+  // String table with all string values used in the layout
+  repeated StringEntry string_entries = 1;
+  // View tree structure (uses string IDs from string_entries)
+  ViewNode root_view = 2;
+  Screenshot screenshot = 3;
+  AppContext app_context = 4;
+  Configuration configuration = 5;
+}
+
+message PropertiesEvent {
+  // String table with all string values used in properties
+  repeated StringEntry string_entries = 1;
+  int64 root_id = 2;
+  repeated Property properties = 3;
+}
+
+message WindowRootsEvent {
+  repeated int64 ids = 1;
+}
+
+message ProgressEvent {
+  string message = 1;
+}
+
+message ErrorEvent {
+  string message = 1;
+}
+
+message FoldEvent {
+  FoldState fold_state = 1;
+  int32 hinge_angle = 2;
+  Rect hinge_bounds = 3;
+}
+
+// Data structures
+
+message WindowRoots {
+  repeated int64 ids = 1;
+}
+
+// Standalone WindowSnapshot (for backward compatibility)
+// Note: CaptureSnapshotResponse has its own nested WindowSnapshot
+message WindowSnapshot {
+  LayoutEvent layout = 1;
+  PropertiesEvent properties = 2;
+}
+
+message ViewNode {
+  ViewNodeData node = 1;
+  repeated ViewNode children = 2;
+}
+
+message ViewNodeData {
+  int64 id = 1;
+  string class_name = 2;
+  string package_name = 3;
+  Resource resource = 4;
+  Rect bounds = 5;
+  Rect scroll_bounds = 6;
+  Transform transform = 7;
+  repeated string flags = 8;
+  bool has_merged_semantics = 9;
+  bool has_unmerged_semantics = 10;
+  int64 draw_id = 11;
+  int32 layout_flags = 12;
+}
+
+message Resource {
+  int32 type = 1;
+  int32 namespace = 2;
+  string name = 3;
+}
+
+message Rect {
+  int32 x = 1;
+  int32 y = 2;
+  int32 w = 3;
+  int32 h = 4;
+}
+
+message Transform {
+  float scale_x = 1;
+  float scale_y = 2;
+  float translation_x = 3;
+  float translation_y = 4;
+  float translation_z = 5;
+  float rotation_x = 6;
+  float rotation_y = 7;
+  float rotation_z = 8;
+  float pivot_x = 9;
+  float pivot_y = 10;
+}
+
+message Screenshot {
+  enum Type {
+    UNKNOWN = 0;
+    SKP = 1;
+    BITMAP = 2;
+  }
+  Type type = 1;
+  bytes bytes = 2;
+}
+
+message AppContext {
+  Theme theme = 1;
+  string package_name = 2;
+}
+
+message Theme {
+  string name = 1;
+}
+
+message Configuration {
+  int32 density = 1;
+  float font_scale = 2;
+  int32 screen_width_dp = 3;
+  int32 screen_height_dp = 4;
+}
+
+message FoldState {
+  enum State {
+    UNKNOWN = 0;
+    FLAT = 1;
+    HALF_OPEN = 2;
+  }
+  State state = 1;
+}
+
+// Properties
+
+message PropertyGroup {
+  repeated Property properties = 1;
+}
+
+message Property {
+  int32 type = 1;
+  string name = 2;
+  string namespace = 3;
+  oneof value_type {
+    int32 int32_value = 4;
+    int64 int64_value = 5;
+    double double_value = 6;
+    float float_value = 7;
+    string string_value = 8;
+    bool flag_value = 9;
+    Resource resource_value = 10;
+    ColorValue color_value = 11;
+  }
+  Resource source = 12;
+}
+
+message ColorValue {
+  int32 color = 1;
+}
+
+// String table for efficient transmission
+message StringEntry {
+  int32 id = 1;
+  string str = 2;
+}
