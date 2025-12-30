@@ -435,6 +435,17 @@ class LayoutInspectorCli : Callable<Int> {
                 )
             }
 
+            // If we have compose data but no layout, still return what we have
+            if (composeData != null && (composeData.composablesResponse != null || composeData.parametersResponse != null)) {
+                println("  No view layout events, but have Compose data - proceeding")
+                return LayoutCaptureResult(
+                    layoutEvent = null,
+                    windowRoots = rootsEvents.lastOrNull(),
+                    rawLayoutEventBytes = null,
+                    composeData = composeData
+                )
+            }
+
             println("  No layout events received")
             return null
         } catch (e: Exception) {
@@ -500,12 +511,27 @@ class LayoutInspectorCli : Callable<Int> {
                 val paramsResponseBytes = composeInspector.sendCommand(getParamsCmd.toByteArray())
                 println("    GetAllParameters: Received ${paramsResponseBytes.size} bytes")
 
+                // Debug: save parameters response to file
+                if (verbose) {
+                    java.io.File("/tmp/params-response.bin").writeBytes(paramsResponseBytes)
+                    println("    Saved parameters response to /tmp/params-response.bin")
+                }
+
                 try {
                     val response = layoutinspector.compose.inspection.Response.parseFrom(paramsResponseBytes)
                     if (response.hasGetAllParametersResponse()) {
                         paramsResponse = response.getAllParametersResponse
-                        val paramCount = paramsResponse.rootParametersCount
-                        println("    Parameters: $paramCount root parameters")
+                        val paramCount = paramsResponse.parameterGroupsCount
+                        val stringCount = paramsResponse.stringsCount
+                        println("    Parameters: $paramCount parameter groups, $stringCount strings")
+
+                        // Debug: print string table
+                        if (verbose && stringCount > 0) {
+                            println("    Parameters string table:")
+                            paramsResponse.stringsList.take(20).forEach { entry ->
+                                println("      ${entry.id} -> '${entry.str}'")
+                            }
+                        }
                     } else {
                         println("    No GetAllParametersResponse in response")
                     }
@@ -580,10 +606,17 @@ class LayoutInspectorCli : Callable<Int> {
     ) {
         val layoutEvent = captureResult.layoutEvent
         val rawLayoutBytes = captureResult.rawLayoutEventBytes
+        val composeData = captureResult.composeData
 
         // If we have raw bytes, use the same extraction logic as for .li files
         if (rawLayoutBytes != null && rawLayoutBytes.size > 1000) {
-            saveRawLayoutAsJson(path, rawLayoutBytes, apiLevel, processName, captureResult.composeData)
+            saveRawLayoutAsJson(path, rawLayoutBytes, apiLevel, processName, composeData)
+            return
+        }
+
+        // If we have compose data but no view layout, save compose-only JSON
+        if (composeData?.composablesResponse != null && layoutEvent == null && rawLayoutBytes == null) {
+            saveComposeOnlyAsJson(path, composeData, apiLevel, processName)
             return
         }
 
@@ -603,7 +636,6 @@ class LayoutInspectorCli : Callable<Int> {
         }
 
         // Add Compose data if available
-        val composeData = captureResult.composeData
         if (composeData?.composablesResponse != null) {
             sb.appendLine(",")
             sb.appendLine("""  "composeTree":""")
@@ -614,6 +646,96 @@ class LayoutInspectorCli : Callable<Int> {
 
         path.toFile().writeText(sb.toString())
         println("  Saved JSON layout tree")
+    }
+
+    /**
+     * Save compose-only snapshot when no view layout data is available.
+     */
+    private fun saveComposeOnlyAsJson(
+        path: Path,
+        composeData: ComposeData,
+        apiLevel: Int,
+        processName: String
+    ) {
+        if (verbose) println("  Saving compose-only data...")
+
+        val result = extractComposeFromInspectorData(composeData)
+        val composeTree = result.first
+        val composeStrings = result.second
+
+        // Categorize strings
+        val composeComposables = mutableListOf<String>()
+        val composeSourceFiles = mutableListOf<String>()
+        val textValues = mutableListOf<String>()
+
+        for ((_, str) in composeStrings) {
+            when {
+                str.endsWith(".kt") || str.endsWith(".java") ->
+                    composeSourceFiles.add(str)
+                str.matches("^[A-Z][a-zA-Z0-9]*$".toRegex()) && str.length > 2 ->
+                    composeComposables.add(str)
+            }
+        }
+
+        // Extract text values from parameters
+        if (composeData.parametersResponse != null) {
+            val paramTextValues = extractTextFromParameters(composeData.parametersResponse)
+            textValues.addAll(paramTextValues)
+        }
+
+        // Build JSON
+        val sb = StringBuilder()
+        sb.appendLine("{")
+        sb.appendLine("""  "metadata": {""")
+        sb.appendLine("""    "processName": "${escapeJson(processName)}",""")
+        sb.appendLine("""    "apiLevel": $apiLevel,""")
+        sb.appendLine("""    "captureTime": "${java.time.Instant.now()}",""")
+        sb.appendLine("""    "source": "LIVE_CAPTURE",""")
+        sb.appendLine("""    "note": "Compose hierarchy only - no view layout captured"""")
+        sb.appendLine("""  },""")
+
+        // Compose hierarchy
+        if (composeTree.isNotEmpty()) {
+            sb.appendLine("""  "composeHierarchy": [""")
+            composeTree.forEachIndexed { index, node ->
+                sb.append(renderComposeNodeJson(node, "    ", index == composeTree.size - 1))
+            }
+            sb.appendLine("""  ],""")
+        } else {
+            sb.appendLine("""  "composeHierarchy": [],""")
+        }
+
+        // Composables list
+        sb.appendLine("""  "composeComposables": [""")
+        composeComposables.distinct().sorted().forEachIndexed { index, comp ->
+            sb.append("""    "${escapeJson(comp)}"""")
+            if (index < composeComposables.distinct().size - 1) sb.append(",")
+            sb.appendLine()
+        }
+        sb.appendLine("""  ],""")
+
+        // Source files
+        sb.appendLine("""  "sourceFiles": [""")
+        composeSourceFiles.distinct().sorted().forEachIndexed { index, file ->
+            sb.append("""    "${escapeJson(file)}"""")
+            if (index < composeSourceFiles.distinct().size - 1) sb.append(",")
+            sb.appendLine()
+        }
+        sb.appendLine("""  ],""")
+
+        // Text content
+        sb.appendLine("""  "textContent": [""")
+        textValues.distinct().sorted().forEachIndexed { index, text ->
+            sb.append("""    "${escapeJson(text)}"""")
+            if (index < textValues.distinct().size - 1) sb.append(",")
+            sb.appendLine()
+        }
+        sb.appendLine("""  ]""")
+
+        sb.appendLine("}")
+
+        path.toFile().writeText(sb.toString())
+        println("  Saved JSON with ${composeTree.size} compose nodes (compose-only)")
     }
 
     /**
@@ -678,6 +800,16 @@ class LayoutInspectorCli : Callable<Int> {
                     str.matches("^[A-Z][a-zA-Z0-9]*$".toRegex()) && str.length > 2 ->
                         composeComposables.add(str)
                 }
+            }
+
+            // Extract text values from parameters response
+            if (verbose) {
+                println("  Parameters response: ${if (composeData.parametersResponse != null) "present" else "NULL"}")
+            }
+            if (composeData.parametersResponse != null) {
+                val paramTextValues = extractTextFromParameters(composeData.parametersResponse)
+                textValues.addAll(paramTextValues)
+                if (verbose) println("  Extracted ${paramTextValues.size} text values from parameters")
             }
         } else {
             // Fall back to extracting from raw bytes
@@ -1855,7 +1987,16 @@ class LayoutInspectorCli : Callable<Int> {
 
         if (node.hasBounds()) {
             val b = node.bounds
-            sb.appendLine("""$indent  "bounds": {"x0": ${b.x0}, "y0": ${b.y0}, "x1": ${b.x1}, "y1": ${b.y1}, "x2": ${b.x2}, "y2": ${b.y2}, "x3": ${b.x3}, "y3": ${b.y3}},""")
+            val boundsStr = if (b.hasLayout()) {
+                val l = b.layout
+                """{"x": ${l.x}, "y": ${l.y}, "w": ${l.w}, "h": ${l.h}}"""
+            } else if (b.hasRender()) {
+                val r = b.render
+                """{"x0": ${r.x0}, "y0": ${r.y0}, "x1": ${r.x1}, "y1": ${r.y1}, "x2": ${r.x2}, "y2": ${r.y2}, "x3": ${r.x3}, "y3": ${r.y3}}"""
+            } else {
+                """{}"""
+            }
+            sb.appendLine("""$indent  "bounds": $boundsStr,""")
         }
 
         sb.appendLine("""$indent  "childCount": ${node.childrenCount},""")
@@ -2534,7 +2675,16 @@ class LayoutInspectorCli : Callable<Int> {
         sb.appendLine("""$indent  "packageHash": ${node.packageHash},""")
 
         val b = node.bounds
-        sb.appendLine("""$indent  "bounds": {"x0": ${b.x0}, "y0": ${b.y0}, "x1": ${b.x1}, "y1": ${b.y1}, "x2": ${b.x2}, "y2": ${b.y2}, "x3": ${b.x3}, "y3": ${b.y3}},""")
+        val boundsStr = if (b.hasLayout()) {
+            val l = b.layout
+            """{"x": ${l.x}, "y": ${l.y}, "w": ${l.w}, "h": ${l.h}}"""
+        } else if (b.hasRender()) {
+            val r = b.render
+            """{"x0": ${r.x0}, "y0": ${r.y0}, "x1": ${r.x1}, "y1": ${r.y1}, "x2": ${r.x2}, "y2": ${r.y2}, "x3": ${r.x3}, "y3": ${r.y3}}"""
+        } else {
+            """{}"""
+        }
+        sb.appendLine("""$indent  "bounds": $boundsStr,""")
 
         if (node.childrenCount > 0) {
             sb.appendLine("""$indent  "children": [""")
@@ -2719,7 +2869,8 @@ class LayoutInspectorCli : Callable<Int> {
         val children: MutableList<ParsedComposableNode> = mutableListOf(),
         val flags: Int = 0,
         val recomposeCount: Int = 0,
-        val skipCount: Int = 0
+        val skipCount: Int = 0,
+        val properties: MutableMap<String, Any> = mutableMapOf()
     )
 
     data class QuadBounds(
@@ -2753,6 +2904,17 @@ class LayoutInspectorCli : Callable<Int> {
         }
         if (node.bounds != null) {
             sb.appendLine("""$indent  "bounds": {"x": ${node.bounds.x}, "y": ${node.bounds.y}, "width": ${node.bounds.width}, "height": ${node.bounds.height}},""")
+        }
+        // Output properties (text, content, etc.)
+        if (node.properties.isNotEmpty()) {
+            node.properties.forEach { (key, value) ->
+                when (value) {
+                    is String -> sb.appendLine("""$indent  "$key": "${escapeJson(value)}",""")
+                    is Number -> sb.appendLine("""$indent  "$key": $value,""")
+                    is Boolean -> sb.appendLine("""$indent  "$key": $value,""")
+                    else -> sb.appendLine("""$indent  "$key": "${escapeJson(value.toString())}",""")
+                }
+            }
         }
         if (node.children.isNotEmpty()) {
             sb.appendLine("""$indent  "children": [""")
@@ -2789,6 +2951,12 @@ class LayoutInspectorCli : Callable<Int> {
             }
         }
 
+        // Build parameter properties map from parameters response
+        val nodePropertiesMap = buildNodePropertiesMap(composeData.parametersResponse, stringTable)
+        if (verbose && nodePropertiesMap.isNotEmpty()) {
+            println("    Built properties map for ${nodePropertiesMap.size} composables")
+        }
+
         // Extract the tree structure from roots
         val nodes = mutableListOf<ParsedComposableNode>()
 
@@ -2804,13 +2972,13 @@ class LayoutInspectorCli : Callable<Int> {
                 if (nodeName == null && node.childrenCount > 0) {
                     if (verbose) println("      Wrapper node - extracting ${node.childrenCount} children")
                     for (child in node.childrenList) {
-                        val parsedChild = parseComposableNodeFromProto(child, stringTable)
+                        val parsedChild = parseComposableNodeFromProto(child, stringTable, nodePropertiesMap)
                         if (parsedChild != null) {
                             nodes.add(parsedChild)
                         }
                     }
                 } else {
-                    val parsedNode = parseComposableNodeFromProto(node, stringTable)
+                    val parsedNode = parseComposableNodeFromProto(node, stringTable, nodePropertiesMap)
                     if (parsedNode != null) {
                         nodes.add(parsedNode)
                     }
@@ -2823,11 +2991,106 @@ class LayoutInspectorCli : Callable<Int> {
     }
 
     /**
+     * Build a map from composable ID to its properties extracted from parameters.
+     */
+    private fun buildNodePropertiesMap(
+        parametersResponse: layoutinspector.compose.inspection.GetAllParametersResponse?,
+        composablesStringTable: Map<Int, String>
+    ): Map<Long, Map<String, Any>> {
+        if (parametersResponse == null) return emptyMap()
+
+        // Build string table from parameters response
+        val paramsStringTable = mutableMapOf<Int, String>()
+        for (stringEntry in parametersResponse.stringsList) {
+            paramsStringTable[stringEntry.id] = stringEntry.str
+        }
+        // Merge with composables string table
+        paramsStringTable.putAll(composablesStringTable)
+
+        val result = mutableMapOf<Long, MutableMap<String, Any>>()
+
+        for (paramGroup in parametersResponse.parameterGroupsList) {
+            val composableId = paramGroup.composableId
+            val properties = mutableMapOf<String, Any>()
+
+            for (param in paramGroup.parameterList) {
+                extractPropertyFromParameter(param, paramsStringTable, properties)
+            }
+
+            if (properties.isNotEmpty()) {
+                result[composableId] = properties
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Extract relevant properties from a parameter into the properties map.
+     */
+    private fun extractPropertyFromParameter(
+        param: layoutinspector.compose.inspection.Parameter,
+        stringTable: Map<Int, String>,
+        properties: MutableMap<String, Any>
+    ) {
+        val paramName = stringTable[param.name] ?: return
+
+        // Property names we want to include
+        val relevantProps = setOf(
+            "text", "content", "label", "title", "message", "hint", "value",
+            "placeholder", "contentDescription", "onClick", "enabled", "checked",
+            "selected", "visible", "alpha", "color", "backgroundColor", "textColor"
+        )
+
+        val lowerParamName = paramName.lowercase()
+        if (lowerParamName !in relevantProps && !lowerParamName.endsWith("text") && !lowerParamName.endsWith("label")) {
+            return
+        }
+
+        // Extract value based on type
+        when (param.type) {
+            layoutinspector.compose.inspection.Parameter.Type.STRING -> {
+                val strValue = stringTable[param.int32Value]
+                if (strValue != null && strValue.isNotEmpty() && isUserVisibleTextValue(strValue, paramName)) {
+                    properties[paramName] = strValue
+                }
+            }
+            layoutinspector.compose.inspection.Parameter.Type.BOOLEAN -> {
+                properties[paramName] = param.int32Value != 0
+            }
+            layoutinspector.compose.inspection.Parameter.Type.INT32 -> {
+                properties[paramName] = param.int32Value
+            }
+            layoutinspector.compose.inspection.Parameter.Type.INT64 -> {
+                properties[paramName] = param.int64Value
+            }
+            layoutinspector.compose.inspection.Parameter.Type.FLOAT -> {
+                properties[paramName] = param.floatValue
+            }
+            layoutinspector.compose.inspection.Parameter.Type.DOUBLE -> {
+                properties[paramName] = param.doubleValue
+            }
+            layoutinspector.compose.inspection.Parameter.Type.COLOR -> {
+                // Convert color int to hex string
+                val colorInt = param.int32Value
+                properties[paramName] = String.format("#%08X", colorInt)
+            }
+            else -> {
+                // For complex types, check nested elements
+                for (element in param.elementsList) {
+                    extractPropertyFromParameter(element, stringTable, properties)
+                }
+            }
+        }
+    }
+
+    /**
      * Parse a ComposableNode from the proto message into our ParsedComposableNode format.
      */
     private fun parseComposableNodeFromProto(
         node: layoutinspector.compose.inspection.ComposableNode,
-        stringTable: Map<Int, String>
+        stringTable: Map<Int, String>,
+        nodePropertiesMap: Map<Long, Map<String, Any>> = emptyMap()
     ): ParsedComposableNode? {
         val name = stringTable[node.name] ?: return null
         val filename = stringTable.getOrDefault(node.filename, "")
@@ -2835,23 +3098,29 @@ class LayoutInspectorCli : Callable<Int> {
         // Parse bounds if present
         val bounds = if (node.hasBounds()) {
             val b = node.bounds
-            // Check if using nested Size format (width/height) or direct Quad format (x0,y0,x1,y1...)
-            if (b.hasSize()) {
-                val s = b.size
-                QuadBounds(s.x, s.y, s.x + s.width, s.y, s.x + s.width, s.y + s.height, s.x, s.y + s.height)
+            // Check if using Rect layout format (width/height) or Quad render format (x0,y0,x1,y1...)
+            if (b.hasLayout()) {
+                val s = b.layout
+                QuadBounds(s.x, s.y, s.x + s.w, s.y, s.x + s.w, s.y + s.h, s.x, s.y + s.h)
+            } else if (b.hasRender()) {
+                val r = b.render
+                QuadBounds(r.x0, r.y0, r.x1, r.y1, r.x2, r.y2, r.x3, r.y3)
             } else {
-                QuadBounds(b.x0, b.y0, b.x1, b.y1, b.x2, b.y2, b.x3, b.y3)
+                null
             }
         } else null
 
         // Recursively parse children
         val children = mutableListOf<ParsedComposableNode>()
         for (childNode in node.childrenList) {
-            val parsedChild = parseComposableNodeFromProto(childNode, stringTable)
+            val parsedChild = parseComposableNodeFromProto(childNode, stringTable, nodePropertiesMap)
             if (parsedChild != null) {
                 children.add(parsedChild)
             }
         }
+
+        // Get properties for this node from the map
+        val properties = nodePropertiesMap[node.id]?.toMutableMap() ?: mutableMapOf()
 
         return ParsedComposableNode(
             id = node.id,
@@ -2862,8 +3131,132 @@ class LayoutInspectorCli : Callable<Int> {
             children = children,
             flags = node.flags,
             recomposeCount = node.recomposeCount,
-            skipCount = node.skipCount
+            skipCount = node.recomposeSkips,
+            properties = properties
         )
+    }
+
+    /**
+     * Extract text values from GetAllParametersResponse.
+     * Looks for parameters named "text" or containing string values that appear to be user-visible text.
+     */
+    private fun extractTextFromParameters(
+        parametersResponse: layoutinspector.compose.inspection.GetAllParametersResponse
+    ): List<String> {
+        val textValues = mutableListOf<String>()
+
+        // Build string table from parameters response
+        val stringTable = mutableMapOf<Int, String>()
+        for (stringEntry in parametersResponse.stringsList) {
+            stringTable[stringEntry.id] = stringEntry.str
+        }
+
+        if (verbose) {
+            println("    Parameters string table (${stringTable.size} entries):")
+            stringTable.entries.sortedBy { it.key }.take(10).forEach { (id, str) ->
+                println("      $id -> $str")
+            }
+        }
+
+        // Iterate through all parameter groups (each corresponds to a composable)
+        if (verbose) {
+            println("    Processing ${parametersResponse.parameterGroupsCount} parameter groups...")
+        }
+        var totalParams = 0
+        for (paramGroup in parametersResponse.parameterGroupsList) {
+            if (verbose && paramGroup.parameterCount > 0) {
+                println("      Composable ${paramGroup.composableId}: ${paramGroup.parameterCount} params")
+            }
+            for (param in paramGroup.parameterList) {
+                totalParams++
+                extractTextFromParameter(param, stringTable, textValues, verbose)
+            }
+        }
+        if (verbose) {
+            println("    Total parameters examined: $totalParams, text values found: ${textValues.size}")
+        }
+
+        return textValues.distinct()
+    }
+
+    /**
+     * Recursively extract text values from a parameter and its nested elements.
+     */
+    private fun extractTextFromParameter(
+        param: layoutinspector.compose.inspection.Parameter,
+        stringTable: Map<Int, String>,
+        textValues: MutableList<String>,
+        verbose: Boolean = false
+    ) {
+        // Field 2 (name) is the parameter name string ID
+        val paramName = stringTable[param.name] ?: ""
+
+        // For STRING type parameters, int32_value (field 11) is a string table reference
+        val isStringType = param.type == layoutinspector.compose.inspection.Parameter.Type.STRING
+        val valueStr = if (isStringType && param.int32Value != 0) {
+            stringTable[param.int32Value]
+        } else null
+
+        // Debug output for all parameter values
+        if (verbose && paramName.isNotEmpty()) {
+            val valueType = when {
+                valueStr != null -> "ref -> '$valueStr'"
+                param.int32Value != 0 -> "int32: ${param.int32Value}"
+                param.int64Value != 0L -> "int64: ${param.int64Value}"
+                param.doubleValue != 0.0 -> "double: ${param.doubleValue}"
+                param.hasReference() -> "reference"
+                param.hasLambdaValue() -> "lambda"
+                else -> "type: ${param.type}"
+            }
+            println("        param '$paramName' -> $valueType")
+        }
+
+        // Check if this is a string value (by reference in int32_value for STRING type)
+        if (valueStr != null) {
+            // Add if it looks like user-visible text (not a class name, enum value, etc.)
+            if (isUserVisibleTextValue(valueStr, paramName)) {
+                textValues.add(valueStr)
+                if (verbose) println("    Found text: '$valueStr' (param: $paramName)")
+            }
+        }
+
+        // Also check nested elements (for composite parameters like AnnotatedString)
+        param.elementsList.forEach { element ->
+            extractTextFromParameter(element, stringTable, textValues, verbose)
+        }
+    }
+
+    /**
+     * Check if a string value appears to be user-visible text content.
+     */
+    private fun isUserVisibleTextValue(value: String, paramName: String): Boolean {
+        // Empty or very short strings are usually not user text
+        if (value.length < 2) return false
+
+        // Parameter name hints: "text", "content", "label", "title", "message", "hint"
+        val textParamNames = setOf("text", "content", "label", "title", "message", "hint", "value", "placeholder")
+        if (paramName.lowercase() in textParamNames) return true
+
+        // Skip common non-text patterns
+        // Package names (contains dots and mostly lowercase)
+        if (value.contains(".") && value.all { it.isLetterOrDigit() || it == '.' || it == '_' }) return false
+
+        // Class names (PascalCase without spaces)
+        if (value.matches("^[A-Z][a-zA-Z0-9]+$".toRegex())) return false
+
+        // Enum values (UPPER_SNAKE_CASE)
+        if (value.matches("^[A-Z][A-Z0-9_]*$".toRegex())) return false
+
+        // Color/resource values
+        if (value.startsWith("#") || value.startsWith("@")) return false
+
+        // If it has mixed case with spaces or is a simple phrase, it's likely text
+        if (value.contains(" ")) return true
+
+        // Short alphanumeric strings could be labels/buttons
+        if (value.length <= 20 && value.any { it.isLetter() }) return true
+
+        return false
     }
 
     /**

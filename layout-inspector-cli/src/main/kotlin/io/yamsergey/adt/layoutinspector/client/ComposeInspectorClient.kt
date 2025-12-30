@@ -72,17 +72,17 @@ class ComposeInspectorClient(
      * Update inspector settings.
      *
      * @param includeRecomposeCounts Whether to include recomposition counts
-     * @param includeAllParameters Whether to include all parameters
+     * @param delayParameterExtractions Whether to delay parameter extractions
      */
     suspend fun updateSettings(
         includeRecomposeCounts: Boolean = false,
-        includeAllParameters: Boolean = true
+        delayParameterExtractions: Boolean = false
     ): UpdateSettingsResponse {
         val command = Command.newBuilder()
             .setUpdateSettingsCommand(
                 UpdateSettingsCommand.newBuilder()
                     .setIncludeRecomposeCounts(includeRecomposeCounts)
-                    .setIncludeAllParameters(includeAllParameters)
+                    .setDelayParameterExtractions(delayParameterExtractions)
                     .build()
             )
             .build()

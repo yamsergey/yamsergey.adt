@@ -1,6 +1,10 @@
 # Android Studio Layout Inspector Snapshot Format (.li)
 
-This document describes the binary format of Android Studio Layout Inspector snapshot files, based on reverse engineering of actual snapshot data.
+This document describes the binary format of Android Studio Layout Inspector snapshot files.
+
+**Note:** The Compose proto definitions in this document are based on the official
+`compose_layout_inspection.proto` from `prebuilts/tools/common/app-inspection/androidx/compose/ui/compose-ui-inspection.jar`
+in the Android Studio source tree.
 
 ## Overview
 
@@ -139,74 +143,171 @@ message GetComposablesResponse {
 }
 
 message ComposableRoot {
-  int64 view_id = 1;
+  int64 view_id = 1;                   // The View ID this Compose tree is rooted under
   repeated ComposableNode nodes = 2;   // Top-level composables
-  int32 recompose_count = 3;
-  int32 skip_count = 4;
+  repeated int64 views_to_skip = 3;    // View IDs to hide (internal views)
 }
+```
+
+### Compose Parameters (GetAllParametersResponse)
+
+Based on the official `compose_layout_inspection.proto` from Android Studio sources:
+
+```protobuf
+message GetAllParametersResponse {
+  int64 root_view_id = 1;                  // Echoed from command
+  repeated StringEntry strings = 2;        // String table
+  repeated ParameterGroup parameter_groups = 3;  // Per-composable parameters
+}
+
+message ParameterGroup {
+  sint64 composable_id = 1;                // Matches ComposableNode.id
+  // Field 2 is reserved
+  repeated Parameter parameter = 3;        // Parameters for this composable (singular name!)
+  repeated Parameter merged_semantics = 4; // Merged accessibility semantics
+  repeated Parameter unmerged_semantics = 5; // Unmerged semantics
+}
+
+message Parameter {
+  enum Type {
+    UNSPECIFIED = 0;
+    STRING = 1;
+    BOOLEAN = 2;
+    DOUBLE = 3;
+    FLOAT = 4;
+    INT32 = 5;
+    INT64 = 6;
+    COLOR = 7;
+    RESOURCE = 8;
+    DIMENSION_DP = 9;
+    DIMENSION_SP = 10;
+    DIMENSION_EM = 11;
+    LAMBDA = 12;
+    FUNCTION_REFERENCE = 13;
+    ITERABLE = 14;
+  }
+
+  Type type = 1;                           // Parameter type
+  int32 name = 2;                          // String table index for param name
+  repeated Parameter elements = 3;         // Nested elements (for complex types)
+  ParameterReference reference = 4;        // Reference for detail fetching
+  sint32 index = 5;                        // Index in parent composite
+
+  oneof value {
+    int32 int32_value = 11;                // Integer/boolean/string-ref value
+    int64 int64_value = 12;                // Long value
+    double double_value = 13;              // Double value
+    float float_value = 14;                // Float value
+    Resource resource_value = 15;          // Android resource reference
+    LambdaValue lambda_value = 16;         // Lambda function reference
+  }
+}
+```
+
+**Key notes:**
+- The `parameter` field in `ParameterGroup` uses a **singular** name (not `parameters`)
+- String values are stored with `type = STRING` and the value in `int32_value` as a string table index
+- Boolean values use `type = BOOLEAN` with 0/1 in `int32_value`
+
+### Text Content Extraction
+
+Text displayed in Compose UI (e.g., from `Text` composables) is extracted from parameters:
+
+1. Build string table from `GetAllParametersResponse.strings`
+2. For each `ParameterGroup` in `parameter_groups`:
+   - Iterate over `parameter` list (note: singular field name, not `parameters`)
+   - Look up parameter name using `param.name` (field 2) → string table
+   - For STRING type parameters, look up value using `param.int32_value` (field 11) → string table
+   - If param name is "text", "content", "label", "title", etc., include the value
+
+**Example wire format for a text parameter:**
+```
+Parameter for Text("Hello Android!"):
+  Field 1 (type): 1 → STRING
+  Field 2 (name): 92 → "text" (string table lookup)
+  Field 11 (int32_value): 93 → "Hello Android!" (string table lookup)
+```
+
+**Wire bytes example:**
+```
+08 01        # Field 1 (type) = 1 (STRING)
+10 5C        # Field 2 (name) = 92
+58 5D        # Field 11 (int32_value) = 93
 ```
 
 ### ComposableNode
 
-The core structure for compose UI elements. **Note:** The actual wire format from Android devices differs from the proto definitions found in AOSP. The field numbers below reflect the actual on-device format discovered through reverse engineering:
+The core structure for compose UI elements. Based on the official `compose_layout_inspection.proto`:
 
 ```protobuf
 message ComposableNode {
-  int64 id = 1;                            // Unique node identifier
+  sint64 id = 1;                           // Unique node identifier
   repeated ComposableNode children = 2;    // Child composables (recursive)
-  int64 anchor_hash = 3;                   // Anchor hash for recomposition tracking
+  int32 package_hash = 3;                  // Hash of source file's package
   int32 filename = 4;                      // String table index -> source file
   int32 line_number = 5;                   // Source line number
   int32 offset = 6;                        // Character offset in source
   int32 name = 7;                          // String table index -> composable name
-  Quad bounds = 8;                         // Layout bounds
-  int32 flags = 9;                         // Node flags
-  int32 package_hash = 10;
-  int32 recompose_count = 11;
-  int32 skip_count = 12;
-  int64 view_id = 13;                      // Associated Android View ID
-  repeated RenderNode render_nodes = 14;   // Render tree nodes
-  bool has_merged_semantics = 15;
-  bool has_unmerged_semantics = 16;
+  Bounds bounds = 8;                       // Layout bounds
+
+  enum Flags {
+    NONE = 0;
+    SYSTEM_CREATED = 0x1;
+    HAS_MERGED_SEMANTICS = 0x2;
+    HAS_UNMERGED_SEMANTICS = 0x4;
+    INLINED = 0x8;
+    NESTED_SINGLE_CHILDREN = 0x10;
+    HAS_DRAW_MODIFIER = 0x20;
+    HAS_CHILD_DRAW_MODIFIER = 0x40;
+  }
+  int32 flags = 9;                         // Bitmask of Flags enum
+
+  int64 view_id = 10;                      // Associated Android View ID
+  int32 recompose_count = 11;              // Recomposition count since reset
+  int32 recompose_skips = 12;              // Skipped recompositions count
+  sint32 anchor_hash = 13;                 // Unique anchor ID for this node
 }
 ```
 
-**Key difference from AOSP definitions:** Children are at field 2 (not 9), and name is at field 7 (not 2).
+**Key structure notes:**
+- `children` is at field 2 and `name` at field 7
+- `recompose_skips` (not `skip_count`) at field 12
+- `anchor_hash` is `sint32` (signed, uses ZigZag encoding) at field 13
 
-### Bounds (Quad)
+### Bounds
 
-Bounds can be stored in two formats:
+Bounds describe the position and shape of a composable. Based on the official proto:
 
-**Format 1: Nested Size (for simple rectangular bounds)**
 ```protobuf
-message Quad {
-  QuadSize size = 1;  // Simple rectangle bounds
+message Bounds {
+  Rect layout = 1;   // Layout bounds (simple rectangle)
+  Quad render = 2;   // Render bounds (transformed quadrilateral)
 }
 
-message QuadSize {
+message Rect {
   int32 x = 1;       // Left X coordinate
   int32 y = 2;       // Top Y coordinate
-  int32 width = 3;   // Width
-  int32 height = 4;  // Height
+  int32 w = 3;       // Width (not 'width')
+  int32 h = 4;       // Height (not 'height')
 }
-```
 
-**Format 2: Full Quadrilateral (for rotated/transformed views)**
-```protobuf
 message Quad {
-  // When size is not present, use corner coordinates:
-  int32 x0 = 2;  // Top-left X
-  int32 y0 = 3;  // Top-left Y
-  int32 x1 = 4;  // Top-right X
-  int32 y1 = 5;  // Top-right Y
-  int32 x2 = 6;  // Bottom-right X
-  int32 y2 = 7;  // Bottom-right Y
-  int32 x3 = 8;  // Bottom-left X
-  int32 y3 = 9;  // Bottom-left Y
+  // Four corners of a transformed polygon in drawing order
+  sint32 x0 = 1;     // Top-left X
+  sint32 y0 = 2;     // Top-left Y
+  sint32 x1 = 3;     // Top-right X
+  sint32 y1 = 4;     // Top-right Y
+  sint32 x2 = 5;     // Bottom-right X
+  sint32 y2 = 6;     // Bottom-right Y
+  sint32 x3 = 7;     // Bottom-left X
+  sint32 y3 = 8;     // Bottom-left Y
 }
 ```
 
-Most composables use Format 1 with nested QuadSize containing width/height.
+**Usage:**
+- `layout` contains the pre-transform layout bounds (simple x, y, width, height)
+- `render` contains the post-transform bounds as a quadrilateral (for rotated/scaled views)
+- Most composables have `layout` populated; `render` is used when transformations are applied
 
 ### String Table
 
@@ -377,8 +478,32 @@ The Layout Inspector CLI can output captured data as JSON using `--json`:
 | `viewClasses` | List of Android View class names found |
 | `composeComposables` | List of Compose function names found |
 | `sourceFiles` | Kotlin/Java source files referenced |
-| `textContent` | Text strings displayed in the UI |
+| `textContent` | User-visible text strings extracted from UI (see below) |
 | `allStrings` | Complete string table from the capture |
+
+### textContent Extraction
+
+The `textContent` array contains user-visible text extracted from Compose parameters. Text is extracted when:
+
+1. A parameter has a name like "text", "content", "label", "title", "message", "hint", "value", or "placeholder"
+2. The value looks like user text (contains spaces, isn't a class name, package name, or enum value)
+
+**Filtering rules applied:**
+- Excluded: Package names (e.g., `androidx.compose.material3`)
+- Excluded: Class names (e.g., `MaterialTheme`, `TextStyle`)
+- Excluded: Enum values (e.g., `UPPER_CASE_VALUES`)
+- Excluded: Color/resource references (e.g., `#FF0000`, `@string/app_name`)
+- Included: Text with spaces (e.g., `"Hello Android!"`)
+- Included: Short alphanumeric labels (e.g., `"OK"`, `"Cancel"`)
+
+**Example output:**
+```json
+"textContent": [
+  "Hello Android!",
+  "Welcome to the app",
+  "Submit"
+]
+```
 
 ## Version History
 
