@@ -1,3 +1,7 @@
+# Archived
+
+I moved all of the work to [https://github.com/yamsergey/dta](https://github.com/yamsergey/dta) . Due to multiple reasons including naming, Android and ADT belongs to Google.
+
 # Android Development Tools (ADT)
 
 [![](https://jitpack.io/v/yamsergey/yamsergey.adt.svg)](https://jitpack.io/#yamsergey/yamsergey.adt)
